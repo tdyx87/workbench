@@ -44,7 +44,7 @@
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>
-      {% if note.content %}<p class="entry-body">{{ note.content }}</p>{% endif %}
+      {% if note.content %}<div class="entry-body md-body">{{ note.content|md }}</div>{% endif %}
       <footer class="entry-foot">
         <form method="post" action="{{ url_for('update_mastery', note_id=note.id) }}" class="inline mastery-form">
           <span class="progress"><i style="width:{{ note.mastery }}%"></i></span>

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}周报生成 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">📄 周报生成 <span class="muted">{{ week_start }} ~ {{ week_end }}</span></h1>
+
+<section class="card">
+  <h2>本周工作周报 <button class="btn btn-sm" onclick="copyReport()" type="button">一键复制</button></h2>
+  <pre id="report-text" class="report-box">{{ report }}</pre>
+</section>
+
+<script>
+function copyReport() {
+  const text = document.getElementById('report-text').innerText;
+  navigator.clipboard.writeText(text).then(function () {
+    alert('周报已复制到剪贴板');
+  }).catch(function () {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('周报已复制到剪贴板');
+  });
+}
+</script>
+{% endblock %}

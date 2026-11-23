@@ -195,6 +195,53 @@ body {
 .hm-cell.lv3 { background: #216e39; }
 .hm-legend { display: flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 12px; }
 
+/* 日记 */
+.mood-row { display: flex; gap: 12px; margin-top: 6px; }
+.mood-opt { display: inline-flex; align-items: center; gap: 4px; font-size: 20px; cursor: pointer; margin-bottom: 0 !important; }
+.mood-opt input { width: auto !important; margin: 0 !important; }
+.mood-big { font-size: 20px; }
+
+/* 习惯打卡 */
+.habit-list { display: flex; flex-direction: column; }
+.habit-item {
+  display: flex; align-items: center; gap: 14px; padding: 14px 0;
+  border-bottom: 1px solid #f0f2f5;
+}
+.habit-item:last-child { border-bottom: none; }
+.habit-check { font-size: 24px; width: 34px; }
+.habit-item.checked .habit-info strong { color: #27ae60; }
+.habit-info { flex: 1; }
+.habit-meta { display: flex; gap: 14px; margin-top: 4px; font-size: 13px; }
+.streak { color: #e67e22; font-weight: 600; }
+.habit-recent { display: flex; gap: 4px; margin-top: 6px; }
+.habit-dot { width: 10px; height: 10px; border-radius: 50%; background: #40c463; display: inline-block; }
+
+/* 周报 */
+.report-box {
+  background: #fbfcfd; border: 1px solid #e6eaf0; border-radius: 8px;
+  padding: 18px 20px; font-size: 14px; line-height: 1.9; white-space: pre-wrap;
+  font-family: inherit; color: #2c3e50; max-height: 560px; overflow-y: auto;
+}
+
+/* Markdown 渲染 */
+.md-body h1, .md-body h2, .md-body h3 { margin: 10px 0 6px; font-size: 15px; }
+.md-body p { margin: 6px 0; }
+.md-body code {
+  background: #eef1f5; padding: 2px 6px; border-radius: 4px;
+  font-family: Consolas, Monaco, monospace; font-size: 13px;
+}
+.md-body pre {
+  background: #2c3e50; color: #e8eef4; padding: 12px 16px; border-radius: 8px;
+  overflow-x: auto; margin: 8px 0;
+}
+.md-body pre code { background: none; padding: 0; color: inherit; }
+.md-body table { border-collapse: collapse; margin: 8px 0; }
+.md-body th, .md-body td { border: 1px solid #d9dee5; padding: 6px 12px; font-size: 13px; }
+.md-body ul, .md-body ol { padding-left: 22px; margin: 6px 0; }
+.md-body blockquote {
+  border-left: 3px solid #4a90d9; padding-left: 12px; color: #8a94a6; margin: 8px 0;
+}
+
 .empty { color: #a8b3c2; font-size: 14px; padding: 12px 0; }
 .footer {
   text-align: center; color: #a8b3c2; font-size: 13px; padding: 18px 0;

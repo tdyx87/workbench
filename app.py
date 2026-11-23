@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """个人工作台 - Flask + SQLite 单文件应用
 模块：概览（快捷记录/复习提醒/打卡热力图）、工作记录（项目/模板）、
-      学习笔记（复习计划）、待办事项、每周回顾、登录保护
+      学习笔记（Markdown 渲染/复习计划）、待办事项、日记、习惯打卡、
+      每周回顾、周报生成、登录保护
 """
 import functools
 import hashlib
@@ -11,8 +12,10 @@ import secrets
 import sqlite3
 from datetime import date, datetime, timedelta
 
+import markdown as md_lib
 from flask import (Flask, g, jsonify, redirect, render_template, request,
                    session, url_for)
+from markupsafe import Markup
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("WORKBENCH_DB", "/root/workbench.db")
@@ -54,6 +57,24 @@ CREATE TABLE IF NOT EXISTS templates (
     content TEXT DEFAULT '',
     tags TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS diaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    diary_date TEXT NOT NULL UNIQUE,
+    mood TEXT DEFAULT '',
+    content TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS habits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS habit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    habit_id INTEGER NOT NULL,
+    check_date TEXT NOT NULL,
+    UNIQUE (habit_id, check_date)
+);
 """
 
 MIGRATIONS = [
@@ -64,7 +85,7 @@ MIGRATIONS = [
     "ALTER TABLE study_notes ADD COLUMN last_reviewed TEXT DEFAULT ''",
 ]
 
-REVIEW_INTERVALS = [1, 3, 7, 15, 30]  # 艾宾浩斯复习间隔（天）
+REVIEW_INTERVALS = [1, 3, 7, 15, 30]
 
 DEFAULT_TEMPLATES = [
     ("日报", "工作日报", "【今日完成】\n\n【明日计划】\n\n【问题与风险】\n", "日报"),
@@ -72,6 +93,14 @@ DEFAULT_TEMPLATES = [
      "【会议主题】\n【参会人员】\n【讨论要点】\n1. \n【结论与行动项】\n1. ", "会议"),
     ("周报", "本周工作总结", "【本周重点工作】\n\n【关键进展】\n\n【下周计划】\n\n【需要支持】\n", "周报"),
 ]
+
+MOODS = ["😊", "😐", "😔", "😤", "🤔"]
+
+
+@app.template_filter("md")
+def render_markdown(text):
+    return Markup(md_lib.markdown(
+        text or "", extensions=["fenced_code", "tables", "nl2br"]))
 
 
 def get_db():
@@ -168,6 +197,14 @@ def get_heatmap(db, days=70):
             "SELECT substr(created_at,1,10) d, COUNT(*) c FROM study_notes "
             "WHERE created_at>=? GROUP BY d", (start.isoformat(),)).fetchall():
         counts[r["d"]] = counts.get(r["d"], 0) + r["c"]
+    for r in db.execute(
+            "SELECT check_date d, COUNT(*) c FROM habit_logs WHERE check_date>=? "
+            "GROUP BY check_date", (start.isoformat(),)).fetchall():
+        counts[r["d"]] = counts.get(r["d"], 0) + r["c"]
+    for r in db.execute(
+            "SELECT diary_date d, COUNT(*) c FROM diaries WHERE diary_date>=? "
+            "GROUP BY diary_date", (start.isoformat(),)).fetchall():
+        counts[r["d"]] = counts.get(r["d"], 0) + r["c"]
     cells = []
     for i in range(days):
         d = (start + timedelta(days=i)).isoformat()
@@ -175,6 +212,21 @@ def get_heatmap(db, days=70):
         level = 0 if c == 0 else (1 if c == 1 else (2 if c <= 3 else 3))
         cells.append({"date": d, "count": c, "level": level})
     return cells
+
+
+def habit_streak(db, habit_id):
+    """计算从今天（或昨天）起的连续打卡天数。"""
+    rows = db.execute(
+        "SELECT check_date FROM habit_logs WHERE habit_id=? ORDER BY check_date DESC",
+        (habit_id,)).fetchall()
+    dates = {r["check_date"] for r in rows}
+    today = date.today()
+    d = today if today.isoformat() in dates else today - timedelta(days=1)
+    streak = 0
+    while d.isoformat() in dates:
+        streak += 1
+        d -= timedelta(days=1)
+    return streak
 
 
 @app.route("/")
@@ -196,8 +248,8 @@ def index():
         "SELECT * FROM todos WHERE done=0 ORDER BY CASE priority WHEN '高' THEN 0 "
         "WHEN '中' THEN 1 ELSE 2 END, due_date LIMIT 8").fetchall()
     due_reviews = db.execute(
-        "SELECT * FROM study_notes WHERE next_review!='' AND next_review<=? ORDER BY next_review",
-        (today,)).fetchall()
+        "SELECT * FROM study_notes WHERE next_review!='' AND next_review<=? "
+        "ORDER BY next_review", (today,)).fetchall()
     heatmap = get_heatmap(db)
     return render_template(
         "index.html", stats=stats, recent_logs=recent_logs, recent_notes=recent_notes,
@@ -262,6 +314,111 @@ def todo_page():
                            now_str=date.today().isoformat())
 
 
+@app.route("/diary")
+@login_required
+def diary_page():
+    db = get_db()
+    month = request.args.get("month", date.today().strftime("%Y-%m"))
+    rows = db.execute(
+        "SELECT * FROM diaries WHERE diary_date LIKE ? ORDER BY diary_date DESC",
+        (month + "%",)).fetchall()
+    months = [r["m"] for r in db.execute(
+        "SELECT DISTINCT substr(diary_date,1,7) m FROM diaries ORDER BY m DESC").fetchall()]
+    today_diary = db.execute(
+        "SELECT * FROM diaries WHERE diary_date=?",
+        (date.today().isoformat(),)).fetchone()
+    return render_template("diary.html", diaries=rows, months=months,
+                           active_month=month, today_diary=today_diary,
+                           moods=MOODS, today=date.today().isoformat())
+
+
+@app.route("/api/diary", methods=["POST"])
+@login_required
+def save_diary():
+    f = request.form
+    d = f.get("diary_date") or date.today().isoformat()
+    db = get_db()
+    db.execute(
+        "INSERT INTO diaries (diary_date, mood, content, created_at) VALUES (?,?,?,?) "
+        "ON CONFLICT(diary_date) DO UPDATE SET mood=excluded.mood, content=excluded.content",
+        (d, f.get("mood", ""), f.get("content", ""),
+         datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("diary_page", month=d[:7]))
+
+
+@app.route("/api/diary/<int:diary_id>/delete", methods=["POST"])
+@login_required
+def del_diary(diary_id):
+    db = get_db()
+    db.execute("DELETE FROM diaries WHERE id=?", (diary_id,))
+    db.commit()
+    return redirect(url_for("diary_page"))
+
+
+@app.route("/habit")
+@login_required
+def habit_page():
+    db = get_db()
+    today = date.today().isoformat()
+    habits = db.execute("SELECT * FROM habits ORDER BY id").fetchall()
+    items = []
+    for h in habits:
+        checked = db.execute(
+            "SELECT 1 FROM habit_logs WHERE habit_id=? AND check_date=?",
+            (h["id"], today)).fetchone() is not None
+        total = db.execute(
+            "SELECT COUNT(*) c FROM habit_logs WHERE habit_id=?",
+            (h["id"],)).fetchone()["c"]
+        recent = [r["check_date"] for r in db.execute(
+            "SELECT check_date FROM habit_logs WHERE habit_id=? "
+            "ORDER BY check_date DESC LIMIT 7", (h["id"],)).fetchall()]
+        items.append({
+            "id": h["id"], "name": h["name"], "checked": checked,
+            "total": total, "streak": habit_streak(db, h["id"]), "recent": recent,
+        })
+    return render_template("habit.html", habits=items, today=today)
+
+
+@app.route("/api/habit", methods=["POST"])
+@login_required
+def add_habit():
+    name = request.form.get("name", "").strip()
+    if name:
+        db = get_db()
+        db.execute("INSERT INTO habits (name, created_at) VALUES (?,?)",
+                   (name, datetime.now().isoformat(timespec="seconds")))
+        db.commit()
+    return redirect(url_for("habit_page"))
+
+
+@app.route("/api/habit/<int:habit_id>/check", methods=["POST"])
+@login_required
+def check_habit(habit_id):
+    db = get_db()
+    today = date.today().isoformat()
+    existing = db.execute(
+        "SELECT id FROM habit_logs WHERE habit_id=? AND check_date=?",
+        (habit_id, today)).fetchone()
+    if existing:
+        db.execute("DELETE FROM habit_logs WHERE id=?", (existing["id"],))
+    else:
+        db.execute("INSERT INTO habit_logs (habit_id, check_date) VALUES (?,?)",
+                   (habit_id, today))
+    db.commit()
+    return redirect(url_for("habit_page"))
+
+
+@app.route("/api/habit/<int:habit_id>/delete", methods=["POST"])
+@login_required
+def del_habit(habit_id):
+    db = get_db()
+    db.execute("DELETE FROM habit_logs WHERE habit_id=?", (habit_id,))
+    db.execute("DELETE FROM habits WHERE id=?", (habit_id,))
+    db.commit()
+    return redirect(url_for("habit_page"))
+
+
 @app.route("/review/weekly")
 @login_required
 def weekly_review():
@@ -270,11 +427,11 @@ def weekly_review():
     week_start = today - timedelta(days=today.weekday())
     ws, we = week_start.isoformat(), today.isoformat()
     logs = db.execute(
-        "SELECT * FROM work_logs WHERE log_date BETWEEN ? AND ? ORDER BY log_date DESC, id DESC",
-        (ws, we)).fetchall()
+        "SELECT * FROM work_logs WHERE log_date BETWEEN ? AND ? "
+        "ORDER BY log_date DESC, id DESC", (ws, we)).fetchall()
     notes = db.execute(
-        "SELECT * FROM study_notes WHERE substr(created_at,1,10) BETWEEN ? AND ? ORDER BY id DESC",
-        (ws, we)).fetchall()
+        "SELECT * FROM study_notes WHERE substr(created_at,1,10) BETWEEN ? AND ? "
+        "ORDER BY id DESC", (ws, we)).fetchall()
     done_todos = db.execute("SELECT * FROM todos WHERE done=1").fetchall()
     open_todos = db.execute("SELECT * FROM todos WHERE done=0 ORDER BY due_date").fetchall()
     reviewed = db.execute(
@@ -282,6 +439,41 @@ def weekly_review():
     return render_template("review.html", logs=logs, notes=notes,
                            done_todos=done_todos, open_todos=open_todos,
                            reviewed=reviewed, week_start=ws, week_end=we)
+
+
+@app.route("/report/weekly")
+@login_required
+def weekly_report():
+    db = get_db()
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+    ws, we = week_start.isoformat(), today.isoformat()
+    logs = db.execute(
+        "SELECT * FROM work_logs WHERE log_date BETWEEN ? AND ? ORDER BY log_date, id",
+        (ws, we)).fetchall()
+    open_todos = db.execute(
+        "SELECT * FROM todos WHERE done=0 ORDER BY CASE priority WHEN '高' THEN 0 "
+        "WHEN '中' THEN 1 ELSE 2 END, due_date").fetchall()
+    lines = [f"工作周报（{ws} ~ {we}）", "", "一、本周工作内容"]
+    if logs:
+        for i, log in enumerate(logs, 1):
+            proj = f"[{log['project']}] " if log["project"] else ""
+            lines.append(f"{i}. {log['log_date']} {proj}{log['title']}")
+            if log["content"]:
+                for cl in log["content"].splitlines():
+                    if cl.strip():
+                        lines.append(f"   {cl.strip()}")
+    else:
+        lines.append("（本周暂无工作记录）")
+    lines += ["", "二、下周工作计划（待办跟进）"]
+    if open_todos:
+        for i, t in enumerate(open_todos, 1):
+            due = f"（截止 {t['due_date']}）" if t["due_date"] else ""
+            lines.append(f"{i}. [{t['priority']}] {t['title']}{due}")
+    else:
+        lines.append("（无遗留待办）")
+    report = "\n".join(lines)
+    return render_template("report.html", report=report, week_start=ws, week_end=we)
 
 
 @app.route("/api/quick", methods=["POST"])
@@ -302,6 +494,12 @@ def quick_capture():
             body = text.split(" ", 1)[-1] if " " in text else text.lstrip("#待办 ")
             db.execute("INSERT INTO todos (title, priority, created_at) VALUES (?,?,?)",
                        (body, "中", now))
+        elif text.startswith("#日记"):
+            body = text.split(" ", 1)[-1] if " " in text else text.lstrip("#日记 ")
+            db.execute(
+                "INSERT INTO diaries (diary_date, mood, content, created_at) VALUES (?,?,?,?) "
+                "ON CONFLICT(diary_date) DO UPDATE SET content=excluded.content",
+                (today, "", body, now))
         else:
             body = text.split(" ", 1)[-1] if text.startswith("#工作") and " " in text else text
             db.execute(
@@ -428,6 +626,8 @@ def api_stats():
         "study_notes": db.execute("SELECT COUNT(*) c FROM study_notes").fetchone()["c"],
         "todos_open": db.execute("SELECT COUNT(*) c FROM todos WHERE done=0").fetchone()["c"],
         "todos_done": db.execute("SELECT COUNT(*) c FROM todos WHERE done=1").fetchone()["c"],
+        "diaries": db.execute("SELECT COUNT(*) c FROM diaries").fetchone()["c"],
+        "habits": db.execute("SELECT COUNT(*) c FROM habits").fetchone()["c"],
     })
 
 

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}习惯打卡 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🎯 习惯打卡 <span class="muted">{{ today }}</span></h1>
+
+<section class="card">
+  <h2>新增习惯</h2>
+  <form method="post" action="{{ url_for('add_habit') }}" class="form">
+    <div class="form-row">
+      <label class="grow">习惯名称 <input type="text" name="name" required placeholder="如：背 20 个单词 / 运动 30 分钟 / 阅读 1 章"></label>
+    </div>
+    <button type="submit" class="btn">添加习惯</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>今日打卡（{{ habits|length }} 个习惯）</h2>
+  {% if habits %}
+  <div class="habit-list">
+    {% for h in habits %}
+    <div class="habit-item {{ 'checked' if h.checked }}">
+      <form method="post" action="{{ url_for('check_habit', habit_id=h.id) }}" class="inline">
+        <button class="check habit-check" title="今日打卡">{{ '✓' if h.checked else '○' }}</button>
+      </form>
+      <div class="habit-info">
+        <strong>{{ h.name }}</strong>
+        <div class="habit-meta">
+          <span class="streak">🔥 连续 {{ h.streak }} 天</span>
+          <span class="muted">累计 {{ h.total }} 次</span>
+        </div>
+        <div class="habit-recent">
+          {% for d in h.recent %}<span class="habit-dot" title="{{ d }}"></span>{% endfor %}
+        </div>
+      </div>
+      <form method="post" action="{{ url_for('del_habit', habit_id=h.id) }}" class="inline" onsubmit="return confirm('删除该习惯及其全部打卡记录？')">
+        <button class="btn-del" title="删除">×</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">还没有习惯，添加一个开始打卡吧。</p>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}日记 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">📔 日记</h1>
+
+<section class="card">
+  <h2>写日记</h2>
+  <form method="post" action="{{ url_for('save_diary') }}" class="form">
+    <div class="form-row">
+      <label>日期 <input type="date" name="diary_date" value="{{ today }}"></label>
+      <label>心情
+        <span class="mood-row">
+          {% for m in moods %}
+          <label class="mood-opt"><input type="radio" name="mood" value="{{ m }}" {{ 'checked' if today_diary and today_diary.mood == m }}> {{ m }}</label>
+          {% endfor %}
+        </span>
+      </label>
+    </div>
+    <label>内容
+      <textarea name="content" rows="5" placeholder="今天的心情、想法、发生的事…">{{ today_diary.content if today_diary else '' }}</textarea>
+    </label>
+    <button type="submit" class="btn">保存日记</button>
+    {% if today_diary %}<span class="muted">今天的日记已存在，保存将覆盖更新</span>{% endif %}
+  </form>
+</section>
+
+<section class="card">
+  <h2>历史日记（{{ diaries|length }} 篇）</h2>
+  <div class="filter-bar">
+    {% for m in months %}
+    <a class="chip {{ 'on' if active_month == m }}" href="{{ url_for('diary_page', month=m) }}">{{ m }}</a>
+    {% endfor %}
+  </div>
+  {% if diaries %}
+  <div class="entries">
+    {% for d in diaries %}
+    <article class="entry">
+      <header>
+        <span class="date">{{ d.diary_date }}</span>
+        {% if d.mood %}<span class="mood-big">{{ d.mood }}</span>{% endif %}
+        <form method="post" action="{{ url_for('del_diary', diary_id=d.id) }}" class="inline" onsubmit="return confirm('确定删除这篇日记？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if d.content %}<p class="entry-body">{{ d.content }}</p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">该月份暂无日记。</p>{% endif %}
+</section>
+{% endblock %}
