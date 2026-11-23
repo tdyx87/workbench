@@ -122,6 +122,15 @@ CREATE TABLE IF NOT EXISTS interview_questions (
     last_reviewed TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS compile_errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    compiler TEXT DEFAULT 'GCC',
+    error_msg TEXT NOT NULL,
+    root_cause TEXT DEFAULT '',
+    solution TEXT DEFAULT '',
+    tags TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS = [
@@ -141,8 +150,60 @@ DEFAULT_TEMPLATES = [
     ("周报", "本周工作总结", "【本周重点工作】\n\n【关键进展】\n\n【下周计划】\n\n【需要支持】\n", "周报"),
 ]
 
+# C++ 预置面试题库（题库为空时自动导入）
+CPP_INTERVIEW_QUESTIONS = [
+    ("虚函数的实现机制是什么？",
+     "- 每个含虚函数的类生成一张**虚函数表（vtable）**，编译期确定\n- 对象头部隐藏一个 **vptr 指针**指向该表\n- 调用虚函数时通过 vptr 间接寻址，实现运行时多态\n- 多重继承下有多个 vptr；虚析构保证 delete 基类指针正确析构",
+     "C++ 基础"),
+    ("shared_ptr 和 unique_ptr 的区别与使用场景？",
+     "- **unique_ptr**：独占所有权，不可拷贝只能 move，零开销，默认首选\n- **shared_ptr**：引用计数共享所有权，计数归零析构；有原子操作开销\n- 注意 shared_ptr 循环引用问题，用 weak_ptr 打破\n- make_shared/make_unique 创建，异常安全且减少一次内存分配",
+     "C++ 基础"),
+    ("什么是 RAII？举例说明",
+     "- Resource Acquisition Is Initialization：资源获取即初始化\n- 利用**栈对象析构函数自动执行**的特性管理资源\n- 典型应用：lock_guard 管理锁、智能指针管理内存、fstream 管理文件句柄\n- 核心思想：资源的获取与释放绑定到对象生命周期，异常安全",
+     "C++ 基础"),
+    ("移动语义和完美转发的原理？",
+     "- 移动语义：通过**右值引用（T&&）**将资源从临时对象『偷』过来，避免深拷贝\n- std::move 只是强制转换为右值引用，本身不移动任何东西\n- 完美转发：模板参数 T&&（万能引用）+ std::forward 保持参数的左值/右值属性\n- 引用折叠规则：& + & = &，&& + & = &，&& + && = &&",
+     "C++11/14/17/20"),
+    ("vector 的扩容机制？push_back 的复杂度？",
+     "- 容量不足时分配新内存（通常 **2 倍或 1.5 倍**增长），移动/拷贝旧元素，释放旧内存\n- push_back 均摊 O(1)，最坏 O(n)\n- reserve 预分配避免扩容；扩容会使迭代器、指针、引用失效\n- C++11 后元素有 noexcept 移动构造时优先移动，否则拷贝",
+     "STL"),
+    ("C++ 中如何保证线程安全？常见同步原语有哪些？",
+     "- **互斥锁**：mutex / lock_guard / unique_lock（可 defer、try_lock）\n- **读写锁**：shared_mutex（C++17），读共享写独占\n- **条件变量**：condition_variable 配合 unique_lock，注意虚假唤醒要用 while 判断\n- **原子操作**：atomic<T>，memory_order 控制内存序\n- 无锁队列、thread_local 也是常见手段",
+     "多线程并发"),
+    ("内存泄漏如何排查？",
+     "- **工具**：Valgrind（memcheck）、AddressSanitizer（编译加 -fsanitize=address）、LeakSanitizer\n- **代码层面**：new/delete 配对；优先用智能指针和 RAII\n- **排查思路**：ASan 报告直接给分配栈回溯；Valgrind 的 definitely lost 优先处理\n- 长稳服务观察 RSS 趋势定位泄漏模块",
+     "内存管理"),
+    ("select / poll / epoll 的区别？",
+     "- **select**：fd 集合位图（FD_SETSIZE 限制 1024），每次调用整体拷贝，O(n) 遍历\n- **poll**：链表结构无数量上限，但仍 O(n) 遍历，每次全量拷贝\n- **epoll**：内核维护就绪链表，epoll_wait 只返回就绪 fd，O(1)；支持 LT（水平触发）和 ET（边缘触发）\n- ET 模式必须配合非阻塞 IO 循环读写直到 EAGAIN",
+     "网络编程"),
+    ("什么是内存碎片？如何缓解？",
+     "- 频繁分配释放不同大小内存，导致空闲内存不连续，总量够但大块分配失败\n- 缓解手段：**内存池**（固定大小块快速分配）、对象池、jemalloc/tcmalloc 替换默认分配器\n- slab/slub 是内核中的同类思想",
+     "内存管理"),
+    ("static 关键字在 C++ 中的几种用法？",
+     "1. 函数内静态局部变量：只初始化一次（C++11 起线程安全），生命周期贯穿程序\n2. 全局静态变量/函数：限制在本翻译单元可见（内部链接）\n3. 类静态成员变量：全类共享一份，需在类外定义\n4. 类静态成员函数：无 this 指针，只能访问静态成员",
+     "C++ 基础"),
+]
+
+# C++ 预置代码片段（片段库为空时自动导入）
+CPP_SNIPPETS = [
+    ("线程安全单例（Meyers Singleton）", "cpp",
+     "class Singleton {\npublic:\n    static Singleton& instance() {\n        static Singleton inst;  // C++11 起线程安全\n        return inst;\n    }\n    Singleton(const Singleton&) = delete;\n    Singleton& operator=(const Singleton&) = delete;\nprivate:\n    Singleton() = default;\n};",
+     "设计模式,单例"),
+    ("RAII 文件句柄封装", "cpp",
+     "class FileGuard {\npublic:\n    explicit FileGuard(const char* path, const char* mode)\n        : fp_(fopen(path, mode)) {\n        if (!fp_) throw std::runtime_error(\"open failed\");\n    }\n    ~FileGuard() { if (fp_) fclose(fp_); }\n    FileGuard(const FileGuard&) = delete;\n    FileGuard& operator=(const FileGuard&) = delete;\n    FILE* get() { return fp_; }\nprivate:\n    FILE* fp_;\n};",
+     "RAII,资源管理"),
+    ("读写锁封装（C++17 shared_mutex）", "cpp",
+     "class RWLock {\npublic:\n    void readLock()  { m_.lock_shared(); }\n    void readUnlock() { m_.unlock_shared(); }\n    void writeLock() { m_.lock(); }\n    void writeUnlock() { m_.unlock(); }\nprivate:\n    std::shared_mutex m_;\n};\n\n// 使用：读多写少场景\n// std::shared_lock<std::shared_mutex> lk(mtx);  // 读\n// std::unique_lock<std::shared_mutex> lk(mtx);  // 写",
+     "多线程,锁"),
+    ("chrono 耗时统计（Scope Timer）", "cpp",
+     "class ScopeTimer {\npublic:\n    explicit ScopeTimer(std::string tag) : tag_(std::move(tag)),\n        start_(std::chrono::steady_clock::now()) {}\n    ~ScopeTimer() {\n        auto us = std::chrono::duration_cast<std::chrono::microseconds>(\n            std::chrono::steady_clock::now() - start_).count();\n        printf(\"[%s] cost %.3f ms\\n\", tag_.c_str(), us / 1000.0);\n    }\nprivate:\n    std::string tag_;\n    std::chrono::steady_clock::time_point start_;\n};",
+     "性能,工具"),
+]
+
 MOODS = ["😊", "😐", "😔", "😤", "🤔"]
-PLATFORMS = ["通用", "Android", "iOS", "Windows", "macOS", "Linux", "Web", "Flutter", "HarmonyOS"]
+PLATFORMS = ["通用", "Linux 服务端", "嵌入式", "Qt", "Windows", "macOS",
+             "Android", "iOS", "Web", "Flutter", "HarmonyOS"]
+COMPILERS = ["GCC", "Clang", "MSVC", "CMake", "通用"]
 
 
 @app.template_filter("md")
@@ -189,6 +250,18 @@ def init_db():
         nxt = (date.today() + timedelta(days=REVIEW_INTERVALS[0])).isoformat()
         db.execute("UPDATE interview_questions SET next_review=? WHERE id=?",
                    (nxt, r[0]))
+    now = datetime.now().isoformat(timespec="seconds")
+    if db.execute("SELECT COUNT(*) FROM interview_questions").fetchone()[0] == 0:
+        nxt = (date.today() + timedelta(days=REVIEW_INTERVALS[0])).isoformat()
+        db.executemany(
+            "INSERT INTO interview_questions (question, answer, category, mastery, "
+            "next_review, review_stage, created_at) VALUES (?,?,?,0,?,0,?)",
+            [(q, a, c, nxt, now) for q, a, c in CPP_INTERVIEW_QUESTIONS])
+    if db.execute("SELECT COUNT(*) FROM snippets").fetchone()[0] == 0:
+        db.executemany(
+            "INSERT INTO snippets (title, language, code, tags, created_at) "
+            "VALUES (?,?,?,?,?)",
+            [(t, l, c, g, now) for t, l, c, g in CPP_SNIPPETS])
     db.commit()
     db.close()
 
@@ -855,6 +928,52 @@ def del_interview(qid):
     db.execute("DELETE FROM interview_questions WHERE id=?", (qid,))
     db.commit()
     return redirect(url_for("interview_page"))
+
+
+# ---------- 编译错误速查库 ----------
+
+@app.route("/compile_errors")
+@login_required
+def compile_errors_page():
+    compiler = request.args.get("compiler", "").strip()
+    q = request.args.get("q", "").strip()
+    db = get_db()
+    sql = "SELECT * FROM compile_errors WHERE 1=1"
+    params = []
+    if compiler:
+        sql += " AND compiler=?"
+        params.append(compiler)
+    if q:
+        sql += " AND (error_msg LIKE ? OR root_cause LIKE ? OR solution LIKE ? OR tags LIKE ?)"
+        params += [f"%{q}%"] * 4
+    sql += " ORDER BY id DESC"
+    rows = db.execute(sql, params).fetchall()
+    return render_template("compile_errors.html", errors=rows, compilers=COMPILERS,
+                           active_compiler=compiler, q=q)
+
+
+@app.route("/api/compile_errors", methods=["POST"])
+@login_required
+def add_compile_error():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO compile_errors (compiler, error_msg, root_cause, solution, tags, created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (f.get("compiler", "GCC"), f["error_msg"], f.get("root_cause", ""),
+         f.get("solution", ""), f.get("tags", ""),
+         datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("compile_errors_page"))
+
+
+@app.route("/api/compile_errors/<int:err_id>/delete", methods=["POST"])
+@login_required
+def del_compile_error(err_id):
+    db = get_db()
+    db.execute("DELETE FROM compile_errors WHERE id=?", (err_id,))
+    db.commit()
+    return redirect(url_for("compile_errors_page"))
 
 
 # ---------- 回顾与周报 ----------

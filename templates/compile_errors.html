@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}编译错误速查 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🔧 编译错误速查</h1>
+
+<section class="card">
+  <h2>记录报错</h2>
+  <form method="post" action="{{ url_for('add_compile_error') }}" class="form">
+    <div class="form-row">
+      <label>编译器
+        <select name="compiler">
+          {% for c in compilers %}<option>{{ c }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="grow">错误信息 <input type="text" name="error_msg" required placeholder="如：undefined reference to 'vtable for ...'"></label>
+      <label>标签 <input type="text" name="tags" placeholder="如：链接,模板" style="width:140px"></label>
+    </div>
+    <label>根因
+      <textarea name="root_cause" rows="2" placeholder="报错的根本原因…"></textarea>
+    </label>
+    <label>解决方法
+      <textarea name="solution" rows="2" placeholder="修复方式…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存记录</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>错误库（{{ errors|length }} 条）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索错误信息 / 根因 / 方案 / 标签">
+    <select name="compiler">
+      <option value="">全部编译器</option>
+      {% for c in compilers %}
+      <option value="{{ c }}" {{ 'selected' if active_compiler == c }}>{{ c }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if errors %}
+  <div class="entries">
+    {% for e in errors %}
+    <article class="entry">
+      <header>
+        <span class="cat">{{ e.compiler }}</span>
+        <strong class="err-msg">{{ e.error_msg }}</strong>
+        {% if e.tags %}{% for t in e.tags.split(',') %}<span class="tag">{{ t.strip() }}</span>{% endfor %}{% endif %}
+        <form method="post" action="{{ url_for('del_compile_error', err_id=e.id) }}" class="inline" onsubmit="return confirm('删除这条记录？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if e.root_cause %}<p class="entry-body"><b>根因：</b>{{ e.root_cause }}</p>{% endif %}
+      {% if e.solution %}<p class="entry-body"><b>解决：</b>{{ e.solution }}</p>{% endif %}
+      <footer class="entry-foot"><span class="muted">记录于 {{ e.created_at[:16] }}</span></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的报错记录。下次解决编译错误后记一条，形成自己的速查库。</p>{% endif %}
+</section>
+{% endblock %}

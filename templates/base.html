@@ -20,6 +20,7 @@
         <a href="{{ url_for('bugs_page') }}" class="{{ 'active' if request.endpoint == 'bugs_page' }}">Bug</a>
         <a href="{{ url_for('roadmap_page') }}" class="{{ 'active' if request.endpoint == 'roadmap_page' }}">学习路线</a>
         <a href="{{ url_for('snippets_page') }}" class="{{ 'active' if request.endpoint == 'snippets_page' }}">代码片段</a>
+        <a href="{{ url_for('compile_errors_page') }}" class="{{ 'active' if request.endpoint == 'compile_errors_page' }}">编译错误</a>
         <a href="{{ url_for('releases_page') }}" class="{{ 'active' if request.endpoint == 'releases_page' }}">发版</a>
         <a href="{{ url_for('interview_page') }}" class="{{ 'active' if request.endpoint == 'interview_page' }}">面试题</a>
         <a href="{{ url_for('weekly_review') }}" class="{{ 'active' if request.endpoint == 'weekly_review' }}">回顾</a>
