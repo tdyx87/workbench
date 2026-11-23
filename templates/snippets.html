@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}代码片段库 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">✂️ 代码片段库</h1>
+
+<section class="card">
+  <h2>新增片段</h2>
+  <form method="post" action="{{ url_for('add_snippet') }}" class="form">
+    <div class="form-row">
+      <label class="grow">标题 <input type="text" name="title" required placeholder="如：Android 启动耗时统计工具"></label>
+      <label>语言 <input type="text" name="language" placeholder="如：kotlin / swift / python" list="lang-list" style="width:150px">
+        <datalist id="lang-list">
+          {% for l in languages %}<option value="{{ l }}">{% endfor %}
+        </datalist>
+      </label>
+      <label>标签 <input type="text" name="tags" placeholder="如：性能,工具"></label>
+    </div>
+    <label>代码
+      <textarea name="code" rows="6" placeholder="粘贴代码片段（支持 Markdown 代码块语法）" style="font-family:Consolas,Monaco,monospace"></textarea>
+    </label>
+    <button type="submit" class="btn">保存片段</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>全部片段（{{ snippets|length }} 个）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索标题 / 代码 / 标签">
+    <select name="language">
+      <option value="">全部语言</option>
+      {% for l in languages %}
+      <option value="{{ l }}" {{ 'selected' if active_lang == l }}>{{ l }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if snippets %}
+  <div class="entries">
+    {% for s in snippets %}
+    <article class="entry">
+      <header>
+        {% if s.language %}<span class="cat">{{ s.language }}</span>{% endif %}
+        <strong>{{ s.title }}</strong>
+        {% if s.tags %}{% for t in s.tags.split(',') %}<span class="tag">{{ t.strip() }}</span>{% endfor %}{% endif %}
+        <button class="btn btn-sm btn-ghost" type="button" onclick="copySnippet({{ s.id }})">复制</button>
+        <form method="post" action="{{ url_for('del_snippet', snippet_id=s.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该代码片段？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      <pre class="snippet-code" id="snippet-{{ s.id }}">{{ s.code }}</pre>
+      <footer class="entry-foot"><span class="muted">收藏于 {{ s.created_at[:16] }}</span></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的代码片段。</p>{% endif %}
+</section>
+
+<script>
+function copySnippet(id) {
+  const text = document.getElementById('snippet-' + id).innerText;
+  navigator.clipboard.writeText(text).then(function () {
+    alert('代码已复制到剪贴板');
+  }).catch(function () {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('代码已复制到剪贴板');
+  });
+}
+</script>
+{% endblock %}

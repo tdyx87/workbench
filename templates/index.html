@@ -16,18 +16,29 @@
   <div class="stat-card"><div class="stat-num">{{ stats.study_count }}</div><div class="stat-label">学习笔记</div></div>
   <div class="stat-card warn"><div class="stat-num">{{ stats.todo_open }}</div><div class="stat-label">进行中待办</div></div>
   <div class="stat-card ok"><div class="stat-num">{{ stats.todo_done }}</div><div class="stat-label">已完成待办</div></div>
+  <div class="stat-card danger"><div class="stat-num">{{ stats.bug_open }}</div><div class="stat-label">待解决 Bug</div></div>
 </div>
 
-{% if due_reviews %}
+{% if due_reviews or due_interviews %}
 <section class="card review-alert">
-  <h2>🔔 今日待复习（{{ due_reviews|length }} 篇）<span class="muted">按艾宾浩斯记忆曲线安排</span></h2>
+  <h2>🔔 今日待复习（{{ due_reviews|length + due_interviews|length }} 项）<span class="muted">按艾宾浩斯记忆曲线安排</span></h2>
   <ul class="list">
     {% for note in due_reviews %}
     <li>
       <span class="cat">{{ note.category }}</span>
-      <span class="title">{{ note.topic }}</span>
+      <span class="title">📚 {{ note.topic }}</span>
       <span class="muted">应复习日期 {{ note.next_review }}</span>
       <form method="post" action="{{ url_for('mark_reviewed', note_id=note.id) }}" class="inline">
+        <button class="btn btn-sm" type="submit">已复习 ✓</button>
+      </form>
+    </li>
+    {% endfor %}
+    {% for q in due_interviews %}
+    <li>
+      <span class="cat">{{ q.category }}</span>
+      <span class="title">💼 {{ q.question }}</span>
+      <span class="muted">应复习日期 {{ q.next_review }}</span>
+      <form method="post" action="{{ url_for('review_interview', qid=q.id) }}" class="inline">
         <button class="btn btn-sm" type="submit">已复习 ✓</button>
       </form>
     </li>

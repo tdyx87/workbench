@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Bug 追踪 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🐛 Bug 追踪</h1>
+
+<section class="card">
+  <h2>记录 Bug</h2>
+  <form method="post" action="{{ url_for('add_bug') }}" class="form">
+    <div class="form-row">
+      <label class="grow">标题 <input type="text" name="title" required placeholder="Bug 简述"></label>
+      <label>平台
+        <select name="platform">
+          {% for p in platforms %}<option>{{ p }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>严重等级
+        <select name="severity">
+          <option>高</option><option selected>中</option><option>低</option>
+        </select>
+      </label>
+      <label>状态
+        <select name="status">
+          <option selected>待解决</option><option>已解决</option>
+        </select>
+      </label>
+    </div>
+    <label>问题现象
+      <textarea name="phenomenon" rows="2" placeholder="复现步骤、报错信息、影响范围…"></textarea>
+    </label>
+    <label>根因分析
+      <textarea name="root_cause" rows="2" placeholder="定位到的根本原因…"></textarea>
+    </label>
+    <label>解决方案
+      <textarea name="solution" rows="2" placeholder="修复方式、相关提交、规避方案…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存记录</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Bug 列表（{{ bugs|length }} 条）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索标题 / 现象 / 方案">
+    <select name="platform">
+      <option value="">全部平台</option>
+      {% for p in platforms %}
+      <option value="{{ p }}" {{ 'selected' if active_platform == p }}>{{ p }}</option>
+      {% endfor %}
+    </select>
+    <select name="status">
+      <option value="">全部状态</option>
+      <option value="待解决" {{ 'selected' if active_status == '待解决' }}>待解决</option>
+      <option value="已解决" {{ 'selected' if active_status == '已解决' }}>已解决</option>
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if bugs %}
+  <div class="entries">
+    {% for b in bugs %}
+    <article class="entry">
+      <header>
+        <span class="prio prio-{{ b.severity }}">{{ b.severity }}</span>
+        <span class="cat">{{ b.platform }}</span>
+        <strong class="{{ 'solved' if b.status == '已解决' }}">{{ b.title }}</strong>
+        <span class="bug-status {{ 'resolved' if b.status == '已解决' }}">{{ b.status }}</span>
+        <form method="post" action="{{ url_for('resolve_bug', bug_id=b.id) }}" class="inline">
+          <button class="btn btn-sm {{ 'btn-ghost' if b.status == '已解决' }}" type="submit">
+            {{ '重新打开' if b.status == '已解决' else '标记解决 ✓' }}
+          </button>
+        </form>
+        <form method="post" action="{{ url_for('del_bug', bug_id=b.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('确定删除这条 Bug 记录？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if b.phenomenon %}<p class="entry-body"><b>现象：</b>{{ b.phenomenon }}</p>{% endif %}
+      {% if b.root_cause %}<p class="entry-body"><b>根因：</b>{{ b.root_cause }}</p>{% endif %}
+      {% if b.solution %}<p class="entry-body"><b>方案：</b>{{ b.solution }}</p>{% endif %}
+      <footer class="entry-foot"><span class="muted">记录于 {{ b.created_at[:16] }}</span></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的 Bug 记录。</p>{% endif %}
+</section>
+{% endblock %}

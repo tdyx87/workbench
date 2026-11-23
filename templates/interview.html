@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}面试题集 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">💼 面试题集</h1>
+
+<section class="card">
+  <h2>新增面试题</h2>
+  <form method="post" action="{{ url_for('add_interview') }}" class="form">
+    <div class="form-row">
+      <label class="grow">题目 <input type="text" name="question" required placeholder="如：Handler 消息机制原理？"></label>
+      <label>分类 <input type="text" name="category" placeholder="如：Android / 算法 / 系统设计" list="iq-cat-list" style="width:150px">
+        <datalist id="iq-cat-list">
+          {% for c in categories %}<option value="{{ c }}">{% endfor %}
+        </datalist>
+      </label>
+      <label>掌握度 <input type="number" name="mastery" min="0" max="100" value="0" style="width:80px"> %</label>
+    </div>
+    <label>答案要点（支持 Markdown）
+      <textarea name="answer" rows="4" placeholder="答题思路、关键知识点、易错点…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存题目</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>题库（{{ questions|length }} 题）<span class="muted">带 ⏰ 的表示今日应复习</span></h2>
+  <div class="filter-bar">
+    <a class="chip {{ 'on' if not active_cat }}" href="{{ url_for('interview_page') }}">全部</a>
+    {% for c in categories %}
+    <a class="chip {{ 'on' if active_cat == c }}" href="{{ url_for('interview_page', category=c) }}">{{ c }}</a>
+    {% endfor %}
+  </div>
+  {% if questions %}
+  <div class="entries">
+    {% for q in questions %}
+    <article class="entry">
+      <header>
+        <span class="cat">{{ q.category }}</span>
+        <strong>{{ q.question }}</strong>
+        {% if q.next_review and q.next_review <= today %}<span class="due-badge">⏰ 待复习</span>{% endif %}
+        <form method="post" action="{{ url_for('del_interview', qid=q.id) }}" class="inline" onsubmit="return confirm('删除这道面试题？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if q.answer %}<div class="entry-body md-body">{{ q.answer|md }}</div>{% endif %}
+      <footer class="entry-foot">
+        <span class="progress"><i style="width:{{ q.mastery }}%"></i></span>
+        <span class="muted">掌握 {{ q.mastery }}%</span>
+        <form method="post" action="{{ url_for('review_interview', qid=q.id) }}" class="inline">
+          <button class="btn btn-sm btn-ghost" type="submit">已复习 ✓</button>
+        </form>
+        <span class="muted">第 {{ q.review_stage }} 轮{% if q.next_review %} · 下次复习 {{ q.next_review }}{% endif %}</span>
+      </footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">该分类下暂无面试题。</p>{% endif %}
+</section>
+{% endblock %}

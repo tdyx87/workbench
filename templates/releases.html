@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}版本发布记录 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🚀 版本发布记录</h1>
+
+<section class="card">
+  <h2>记录发版</h2>
+  <form method="post" action="{{ url_for('add_release') }}" class="form">
+    <div class="form-row">
+      <label>版本号 <input type="text" name="version" required placeholder="如：v3.2.1" style="width:140px"></label>
+      <label>发布日期 <input type="date" name="release_date" value="{{ today }}"></label>
+      <label class="grow">平台 <input type="text" name="platform" placeholder="如：Android + iOS"></label>
+    </div>
+    <label>变更内容
+      <textarea name="changes" rows="3" placeholder="本次发版的功能点、优化项…"></textarea>
+    </label>
+    <label>遇到的问题
+      <textarea name="issues" rows="2" placeholder="发版过程中的问题、线上事故、回滚记录…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存记录</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>发版时间线（{{ releases|length }} 次）</h2>
+  {% if releases %}
+  <div class="timeline">
+    {% for r in releases %}
+    <div class="timeline-item">
+      <div class="timeline-dot"></div>
+      <div class="timeline-body">
+        <header>
+          <span class="version-badge">{{ r.version }}</span>
+          {% if r.platform %}<span class="cat">{{ r.platform }}</span>{% endif %}
+          <span class="muted">{{ r.release_date }}</span>
+          <form method="post" action="{{ url_for('del_release', release_id=r.id) }}" class="inline" onsubmit="return confirm('删除该发版记录？')">
+            <button class="btn-del" title="删除">×</button>
+          </form>
+        </header>
+        {% if r.changes %}<p class="entry-body"><b>变更：</b>{{ r.changes }}</p>{% endif %}
+        {% if r.issues %}<p class="entry-body issue"><b>问题：</b>{{ r.issues }}</p>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">还没有发版记录。</p>{% endif %}
+</section>
+{% endblock %}
