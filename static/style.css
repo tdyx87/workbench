@@ -343,3 +343,27 @@ html.dark .st-未开始 { background: #333a47; }
   text-align: center; color: #a8b3c2; font-size: 13px; padding: 18px 0;
   border-top: 1px solid #e6eaf0; background: #fff;
 }
+
+/* 统计分析图表 */
+.bar-chart { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; }
+.bar-row { display: flex; align-items: center; gap: 8px; }
+.bar-label {
+  width: 130px; flex-shrink: 0; font-size: 13px; color: #5a6675;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right;
+}
+.bar-track { flex: 1; background: #eef1f5; border-radius: 4px; height: 16px; overflow: hidden; }
+.bar-fill { display: block; height: 100%; border-radius: 4px; min-width: 2px; }
+.fill-blue { background: #4a90d9; }
+.fill-green { background: #3fb27f; }
+.fill-red { background: #e0605e; }
+.fill-purple { background: #8e6fc0; }
+.bar-num { width: 48px; flex-shrink: 0; font-size: 13px; color: #5a6675; }
+.trend-chart {
+  display: flex; align-items: flex-end; gap: 3px; height: 70px;
+  padding: 8px 4px 0; border-bottom: 1px solid #e6eaf0;
+}
+.trend-bar { flex: 1; min-height: 2px; background: #4a90d9; border-radius: 2px 2px 0 0; opacity: .8; }
+.trend-bar:hover { opacity: 1; background: #2f6fb3; }
+html.dark .bar-track { background: #333a47; }
+html.dark .bar-label, html.dark .bar-num { color: #aab3c2; }
+html.dark .trend-chart { border-bottom-color: #333a47; }

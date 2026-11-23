@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}排障手册 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">📕 打印排障手册 <span class="muted">协议 · 错误码 · 日志 · 已修复崩溃的聚合视图</span></h1>
+
+<section class="card">
+  <h2>📡 协议笔记（{{ sections.protocols|length }} 条）<a class="more" href="{{ url_for('protocols_page') }}">管理 →</a></h2>
+  {% if sections.protocols %}
+  <div class="entries">
+    {% for p in sections.protocols %}
+    <article class="entry">
+      <header><span class="signal-badge">{{ p.protocol }}</span><strong>{{ p.title }}</strong></header>
+      {% if p.summary %}<p class="entry-body">{{ p.summary }}</p>{% endif %}
+      {% if p.commands %}<pre class="snippet-code">{{ p.commands }}</pre>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">暂无协议笔记。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>🚨 错误码速查（{{ sections.error_codes|length }} 条）<a class="more" href="{{ url_for('error_codes_page') }}">管理 →</a></h2>
+  {% if sections.error_codes %}
+  <div class="entries">
+    {% for c in sections.error_codes %}
+    <article class="entry">
+      <header><span class="cat">{{ c.brand }}</span><span class="version-badge">{{ c.code }}</span><strong>{{ c.title }}</strong></header>
+      {% if c.description %}<p class="entry-body"><b>描述：</b>{{ c.description }}</p>{% endif %}
+      {% if c.solution %}<p class="entry-body"><b>方案：</b>{{ c.solution }}</p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">暂无错误码。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>🔍 日志分析模式（{{ sections.log_patterns|length }} 条）<a class="more" href="{{ url_for('log_analysis_page') }}">管理 →</a></h2>
+  {% if sections.log_patterns %}
+  <div class="entries">
+    {% for p in sections.log_patterns %}
+    <article class="entry">
+      <header><span class="signal-badge">{{ p.source }}</span><strong>{{ p.title }}</strong></header>
+      {% if p.pattern %}<pre class="snippet-code">{{ p.pattern }}</pre>{% endif %}
+      {% if p.interpretation %}<p class="entry-body"><b>解读：</b>{{ p.interpretation }}</p>{% endif %}
+      {% if p.action %}<p class="entry-body"><b>处理：</b>{{ p.action }}</p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">暂无日志分析笔记。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>💥 已修复崩溃档案（{{ sections.crashes|length }} 条）<a class="more" href="{{ url_for('crashes_page') }}">管理 →</a></h2>
+  {% if sections.crashes %}
+  <div class="entries">
+    {% for c in sections.crashes %}
+    <article class="entry">
+      <header>
+        {% if c.signal %}<span class="signal-badge">{{ c.signal }}</span>{% endif %}
+        {% if c.module %}<span class="cat">{{ c.module }}</span>{% endif %}
+        <strong class="solved">{{ c.title }}</strong>
+      </header>
+      {% if c.root_cause %}<p class="entry-body"><b>根因：</b>{{ c.root_cause }}</p>{% endif %}
+      {% if c.fix %}<p class="entry-body"><b>修复：</b>{{ c.fix }}</p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">暂无已修复的崩溃档案。</p>{% endif %}
+</section>
+{% endblock %}

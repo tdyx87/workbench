@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}统计分析 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">📊 统计分析</h1>
+
+{% macro bar_block(title, rows, color) %}
+<section class="card">
+  <h2>{{ title }}</h2>
+  {% if rows %}
+    {% set maxc = rows|map(attribute='c')|max %}
+    <div class="bar-chart">
+    {% for r in rows %}
+      <div class="bar-row">
+        <span class="bar-label" title="{{ r.k }}">{{ r.k }}</span>
+        <span class="bar-track"><i class="bar-fill {{ color }}" style="width:{{ (r.c * 100 / maxc)|round(1) }}%"></i></span>
+        <span class="bar-num">{{ r.c }}</span>
+      </div>
+    {% endfor %}
+    </div>
+  {% else %}<p class="empty">暂无数据。</p>{% endif %}
+</section>
+{% endmacro %}
+
+<div class="grid-2">
+  {{ bar_block('🐛 Bug 按平台分布', stats.bug_platform, 'fill-blue') }}
+  {{ bar_block('🐛 Bug 按严重程度', stats.bug_severity, 'fill-red') }}
+</div>
+<div class="grid-2">
+  {{ bar_block('💥 崩溃按信号分布', stats.crash_signal, 'fill-red') }}
+  {{ bar_block('🧪 测试结果分布', stats.test_result, 'fill-green') }}
+</div>
+<div class="grid-2">
+  {{ bar_block('🖨 驱动推荐状态', stats.driver_recommend, 'fill-blue') }}
+  {{ bar_block('🚨 错误码品牌分布', stats.error_brand, 'fill-purple') }}
+</div>
+
+<section class="card">
+  <h2>🧪 各驱动版本测试通过率（近 10 个版本）</h2>
+  {% if stats.test_by_version %}
+  <div class="bar-chart">
+    {% for r in stats.test_by_version %}
+    <div class="bar-row">
+      <span class="bar-label" title="{{ r.k }}">{{ r.k }}</span>
+      <span class="bar-track"><i class="bar-fill fill-green" style="width:{{ (r.pass_c * 100 / r.total_c)|round(1) if r.total_c else 0 }}%"></i></span>
+      <span class="bar-num">{{ r.pass_c }}/{{ r.total_c }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">暂无测试数据。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>📈 近 30 天活动趋势（工作记录 + 学习笔记）</h2>
+  {% set maxa = stats.activity_30d|map(attribute='c')|max %}
+  <div class="trend-chart">
+    {% for r in stats.activity_30d %}
+    <span class="trend-bar" title="{{ r.d }}：{{ r.c }} 条" style="height:{{ (r.c * 60 / maxa)|round(0)|int if maxa else 0 }}px"></span>
+    {% endfor %}
+  </div>
+  <p class="muted">{{ stats.activity_30d[0].d if stats.activity_30d }} ~ {{ stats.activity_30d[-1].d if stats.activity_30d }}</p>
+</section>
+{% endblock %}

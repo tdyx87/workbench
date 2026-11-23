@@ -42,6 +42,10 @@
         <a href="{{ url_for('error_codes_page') }}" class="{{ 'active' if request.endpoint == 'error_codes_page' }}">错误码</a>
         <a href="{{ url_for('log_analysis_page') }}" class="{{ 'active' if request.endpoint == 'log_analysis_page' }}">日志</a>
         <a href="{{ url_for('printers_page') }}" class="{{ 'active' if request.endpoint == 'printers_page' }}">机型</a>
+        <a href="{{ url_for('analytics_page') }}" class="{{ 'active' if request.endpoint == 'analytics_page' }}">统计</a>
+        <a href="{{ url_for('checklist_page') }}" class="{{ 'active' if request.endpoint == 'checklist_page' }}">巡检</a>
+        <a href="{{ url_for('handbook_page') }}" class="{{ 'active' if request.endpoint == 'handbook_page' }}">手册</a>
+        <a href="{{ url_for('release_report_page') }}" class="{{ 'active' if request.endpoint == 'release_report_page' }}">发版报告</a>
         <a href="{{ url_for('releases_page') }}" class="{{ 'active' if request.endpoint == 'releases_page' }}">发版</a>
         <a href="{{ url_for('interview_page') }}" class="{{ 'active' if request.endpoint == 'interview_page' }}">面试题</a>
         <a href="{{ url_for('weekly_review') }}" class="{{ 'active' if request.endpoint == 'weekly_review' }}">回顾</a>

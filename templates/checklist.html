@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}巡检计划 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🩺 巡检与到期提醒</h1>
+<section class="card">
+  <h2>新增巡检项</h2>
+  <form method="post" action="{{ url_for('add_checklist') }}" class="form">
+    <div class="form-row">
+      <label class="grow">巡检事项 <input type="text" name="title" required placeholder="如：检查 M404 搓纸轮磨损"></label>
+      <label>关联机型 <input type="text" name="model" placeholder="选填" style="width:160px"></label>
+      <label>周期(天) <input type="number" name="cycle_days" value="30" min="1" style="width:90px"></label>
+      <label>上次执行 <input type="date" name="last_done"></label>
+    </div>
+    <label>备注
+      <textarea name="note" rows="2" placeholder="巡检要点、注意事项…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存巡检项</button>
+  </form>
+</section>
+<section class="card">
+  <h2>巡检计划（{{ items|length }} 项）<span class="muted">今天是 {{ today }}</span></h2>
+  {% if items %}
+  <div class="entries">
+    {% for c in items %}
+    <article class="entry">
+      <header>
+        {% if c.overdue %}<span class="bug-status">已到期</span>{% else %}<span class="bug-status resolved">正常</span>{% endif %}
+        <strong>{{ c.title }}</strong>
+        {% if c.model %}<span class="cat">{{ c.model }}</span>{% endif %}
+        <span class="muted">每 {{ c.cycle_days }} 天</span>
+        <form method="post" action="{{ url_for('done_checklist', item_id=c.id) }}" class="inline">
+          <button class="btn btn-sm" type="submit">已执行 ✓</button>
+        </form>
+        <form method="post" action="{{ url_for('del_checklist', item_id=c.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该巡检项？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if c.note %}<p class="entry-body">{{ c.note }}</p>{% endif %}
+      <footer class="entry-foot">
+        <span class="muted">上次执行 {{ c.last_done or '从未' }}</span>
+        <span class="muted">下次到期 {{ c.next_due }}</span>
+      </footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">暂无巡检计划，添加第一项吧。</p>{% endif %}
+</section>
+{% endblock %}

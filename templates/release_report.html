@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}发版报告生成 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">📄 发版报告生成</h1>
+<section class="card">
+  <form method="get" class="search-bar">
+    <select name="version">
+      <option value="">选择驱动版本…</option>
+      {% for v in versions %}
+      <option value="{{ v }}" {{ 'selected' if version == v }}>{{ v }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">生成报告</button>
+  </form>
+  {% if not versions %}<p class="empty">测试矩阵中还没有驱动版本数据，先在「测试矩阵」登记测试项。</p>{% endif %}
+</section>
+{% if report %}
+<section class="card">
+  <h2>📄 {{ version }} 发版报告 <span class="muted">Markdown 格式，可直接复制</span></h2>
+  <textarea id="reportText" rows="24" style="width:100%;font-family:Consolas,Monaco,monospace;font-size:13px" readonly>{{ report }}</textarea>
+  <p style="margin-top:8px">
+    <button class="btn" onclick="document.getElementById('reportText').select();document.execCommand('copy')">复制全文</button>
+  </p>
+</section>
+{% elif version %}
+<section class="card"><p class="empty">版本 {{ version }} 暂无数据。</p></section>
+{% endif %}
+{% endblock %}

@@ -232,6 +232,23 @@ CREATE TABLE IF NOT EXISTS printers (
     notes TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS checklists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    model TEXT DEFAULT '',
+    cycle_days INTEGER DEFAULT 30,
+    last_done TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS edit_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    module TEXT NOT NULL,
+    ref_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    detail TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS = [
@@ -400,6 +417,11 @@ def init_db():
             db.execute(f"ALTER TABLE bugs ADD COLUMN {col} TEXT DEFAULT ''")
         except sqlite3.OperationalError:
             pass
+    for table_name, cols in IMPORT_TABLES.items():
+        info = {r[1] for r in db.execute(f"PRAGMA table_info({table_name})").fetchall()}
+        for col in cols:
+            if col not in info:
+                db.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} TEXT DEFAULT ''")
     for b, code, t, desc, sol in ERROR_CODES_SEED:
         if not db.execute(
                 "SELECT 1 FROM error_codes WHERE brand=? AND code=?",
@@ -873,8 +895,16 @@ def add_bug():
 @login_required
 def resolve_bug(bug_id):
     db = get_db()
+    old = db.execute("SELECT status FROM bugs WHERE id=?", (bug_id,)).fetchone()
     db.execute("UPDATE bugs SET status = CASE status WHEN '待解决' THEN '已解决' "
                "ELSE '待解决' END WHERE id=?", (bug_id,))
+    if old:
+        new_status = "已解决" if old["status"] == "待解决" else "待解决"
+        db.execute(
+            "INSERT INTO edit_history (module, ref_id, action, detail, created_at) "
+            "VALUES ('bugs', ?, '状态变更', ?, ?)",
+            (bug_id, f"{old['status']} → {new_status}",
+             datetime.now().isoformat(timespec="seconds")))
     db.commit()
     return redirect(request.referrer or url_for("bugs_page"))
 
@@ -1721,6 +1751,262 @@ def del_printer(printer_id):
     return redirect(url_for("printers_page"))
 
 
+# ---------- 统计分析 ----------
+
+@app.route("/analytics")
+@login_required
+def analytics_page():
+    db = get_db()
+    stats = {}
+    stats["bug_platform"] = db.execute(
+        "SELECT platform k, COUNT(*) c FROM bugs GROUP BY platform ORDER BY c DESC").fetchall()
+    stats["bug_severity"] = db.execute(
+        "SELECT severity k, COUNT(*) c FROM bugs GROUP BY severity ORDER BY "
+        "CASE severity WHEN '高' THEN 0 WHEN '中' THEN 1 ELSE 2 END").fetchall()
+    stats["crash_signal"] = db.execute(
+        "SELECT COALESCE(NULLIF(signal,''),'未知') k, COUNT(*) c FROM crashes "
+        "GROUP BY k ORDER BY c DESC").fetchall()
+    stats["test_result"] = db.execute(
+        "SELECT result k, COUNT(*) c FROM test_matrix GROUP BY result ORDER BY "
+        "CASE result WHEN '通过' THEN 0 WHEN '失败' THEN 1 WHEN '阻塞' THEN 2 ELSE 3 END").fetchall()
+    stats["test_by_version"] = db.execute(
+        "SELECT driver_version k, "
+        "SUM(CASE WHEN result='通过' THEN 1 ELSE 0 END) pass_c, COUNT(*) total_c "
+        "FROM test_matrix GROUP BY driver_version ORDER BY k DESC LIMIT 10").fetchall()
+    stats["driver_recommend"] = db.execute(
+        "SELECT recommend k, COUNT(*) c FROM drivers GROUP BY recommend").fetchall()
+    stats["error_brand"] = db.execute(
+        "SELECT brand k, COUNT(*) c FROM error_codes GROUP BY brand ORDER BY c DESC").fetchall()
+    stats["activity_30d"] = db.execute(
+        "SELECT d, (SELECT COUNT(*) FROM work_logs WHERE log_date=d) + "
+        "(SELECT COUNT(*) FROM study_notes WHERE substr(created_at,1,10)=d) c FROM "
+        "(SELECT date('now', '-' || n || ' days') d FROM "
+        "(SELECT 0 n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 "
+        "UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 UNION SELECT 9 "
+        "UNION SELECT 10 UNION SELECT 11 UNION SELECT 12 UNION SELECT 13 UNION SELECT 14 "
+        "UNION SELECT 15 UNION SELECT 16 UNION SELECT 17 UNION SELECT 18 UNION SELECT 19 "
+        "UNION SELECT 20 UNION SELECT 21 UNION SELECT 22 UNION SELECT 23 UNION SELECT 24 "
+        "UNION SELECT 25 UNION SELECT 26 UNION SELECT 27 UNION SELECT 28 UNION SELECT 29)) "
+        "ORDER BY d").fetchall()
+    return render_template("analytics.html", stats=stats)
+
+
+# ---------- 巡检与到期提醒 ----------
+
+@app.route("/checklist")
+@login_required
+def checklist_page():
+    db = get_db()
+    today = date.today()
+    rows = db.execute("SELECT * FROM checklists ORDER BY last_done, id").fetchall()
+    items = []
+    for r in rows:
+        item = dict(r)
+        if item["last_done"]:
+            try:
+                due = date.fromisoformat(item["last_done"]) + timedelta(days=item["cycle_days"])
+                item["next_due"] = due.isoformat()
+                item["overdue"] = due <= today
+            except ValueError:
+                item["next_due"] = ""
+                item["overdue"] = True
+        else:
+            item["next_due"] = "从未执行"
+            item["overdue"] = True
+        items.append(item)
+    items.sort(key=lambda x: (not x["overdue"], x["next_due"]))
+    return render_template("checklist.html", items=items, today=today.isoformat())
+
+
+@app.route("/api/checklist", methods=["POST"])
+@login_required
+def add_checklist():
+    f = request.form
+    db = get_db()
+    try:
+        cycle = int(f.get("cycle_days", 30) or 30)
+    except ValueError:
+        cycle = 30
+    db.execute(
+        "INSERT INTO checklists (title, model, cycle_days, last_done, note, created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (f["title"], f.get("model", ""), cycle, f.get("last_done", ""),
+         f.get("note", ""), datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("checklist_page"))
+
+
+@app.route("/api/checklist/<int:item_id>/done", methods=["POST"])
+@login_required
+def done_checklist(item_id):
+    db = get_db()
+    db.execute("UPDATE checklists SET last_done=? WHERE id=?",
+               (date.today().isoformat(), item_id))
+    db.commit()
+    return redirect(request.referrer or url_for("checklist_page"))
+
+
+@app.route("/api/checklist/<int:item_id>/delete", methods=["POST"])
+@login_required
+def del_checklist(item_id):
+    db = get_db()
+    db.execute("DELETE FROM checklists WHERE id=?", (item_id,))
+    db.commit()
+    return redirect(url_for("checklist_page"))
+
+
+# ---------- 排障手册（知识库索引） ----------
+
+@app.route("/handbook")
+@login_required
+def handbook_page():
+    db = get_db()
+    sections = {
+        "protocols": db.execute(
+            "SELECT * FROM protocols ORDER BY protocol, id DESC").fetchall(),
+        "error_codes": db.execute(
+            "SELECT * FROM error_codes ORDER BY brand, code").fetchall(),
+        "log_patterns": db.execute(
+            "SELECT * FROM log_patterns ORDER BY source, id DESC").fetchall(),
+        "crashes": db.execute(
+            "SELECT * FROM crashes WHERE status='已修复' ORDER BY id DESC").fetchall(),
+    }
+    return render_template("handbook.html", sections=sections)
+
+
+# ---------- 发版报告生成 ----------
+
+@app.route("/report/release")
+@login_required
+def release_report_page():
+    db = get_db()
+    version = request.args.get("version", "").strip()
+    versions = [r[0] for r in db.execute(
+        "SELECT DISTINCT driver_version FROM test_matrix WHERE driver_version!='' "
+        "ORDER BY driver_version DESC").fetchall()]
+    report = ""
+    if version:
+        tests = db.execute(
+            "SELECT * FROM test_matrix WHERE driver_version=? ORDER BY model, id",
+            (version,)).fetchall()
+        bugs = db.execute(
+            "SELECT * FROM bugs WHERE driver_version=? ORDER BY status, id", (version,)).fetchall()
+        driver = db.execute(
+            "SELECT * FROM drivers WHERE driver_version=? ORDER BY id DESC LIMIT 1",
+            (version,)).fetchone()
+        pass_c = sum(1 for t in tests if t["result"] == "通过")
+        fail_items = [t for t in tests if t["result"] in ("失败", "阻塞")]
+        untested = [t for t in tests if t["result"] == "未测"]
+        open_bugs = [b for b in bugs if b["status"] == "待解决"]
+        lines = [f"# 驱动版本 {version} 发版报告", ""]
+        if driver:
+            lines += [f"- 机型：{driver['model']}"]
+            if driver["release_date"]:
+                lines.append(f"- 发布日期：{driver['release_date']}")
+            lines.append(f"- 推荐状态：{driver['recommend']}")
+            if driver["changes"]:
+                lines += ["", "## 变更摘要", "", driver["changes"]]
+            if driver["known_issues"]:
+                lines += ["", "## 已知问题", "", driver["known_issues"]]
+        lines += ["", f"## 测试情况（通过 {pass_c}/{len(tests)}）", ""]
+        if tests:
+            for t in tests:
+                mark = {"通过": "✅", "失败": "❌", "阻塞": "⛔"}.get(t["result"], "⬜")
+                note = f"（{t['note']}）" if t["note"] else ""
+                lines.append(f"- {mark} {t['model']} / {t['test_item']} {note}")
+        else:
+            lines.append("（该版本无测试记录）")
+        if fail_items:
+            lines += ["", "## ⚠️ 未通过项", ""]
+            for t in fail_items:
+                lines.append(f"- [{t['result']}] {t['model']} / {t['test_item']}")
+        if untested:
+            lines += ["", "## 未测项", ""]
+            for t in untested:
+                lines.append(f"- {t['model']} / {t['test_item']}")
+        lines += ["", f"## 关联 Bug（共 {len(bugs)} 个，待解决 {len(open_bugs)} 个）", ""]
+        for b in bugs:
+            mark = "✅" if b["status"] == "已解决" else "🔴"
+            lines.append(f"- {mark} [{b['severity']}] {b['title']}")
+        report = "\n".join(lines)
+    return render_template("release_report.html", versions=versions,
+                           version=version, report=report)
+
+
+# ---------- 数据导入 ----------
+
+IMPORT_TABLES = {
+    "work_logs": ["log_date", "title", "content", "project", "tags", "created_at"],
+    "study_notes": ["topic", "category", "content", "mastery", "next_review",
+                    "review_stage", "last_reviewed", "created_at"],
+    "todos": ["title", "priority", "due_date", "done", "project", "created_at"],
+    "diaries": ["diary_date", "mood", "content", "created_at"],
+    "bugs": ["title", "platform", "severity", "phenomenon", "root_cause",
+             "solution", "status", "driver_version", "model", "created_at"],
+    "snippets": ["title", "language", "code", "tags", "created_at"],
+    "commands": ["category", "name", "command", "description", "created_at"],
+    "compile_errors": ["compiler", "error_msg", "cause", "solution", "created_at"],
+    "interview_questions": ["question", "answer", "category", "mastery",
+                            "next_review", "review_stage", "created_at"],
+    "perf_records": ["title", "target", "detail", "created_at"],
+    "books": ["title", "author", "note", "progress", "created_at"],
+    "crashes": ["title", "module", "signal", "stack", "root_cause", "fix",
+                "status", "created_at"],
+    "releases": ["version", "release_date", "platform", "changes", "issues",
+                 "created_at"],
+    "drivers": ["model", "driver_version", "firmware_version", "release_date",
+                "changes", "known_issues", "recommend", "created_at"],
+    "protocols": ["title", "protocol", "summary", "commands", "notes", "created_at"],
+    "test_matrix": ["driver_version", "model", "test_item", "result", "tester",
+                    "note", "created_at"],
+    "error_codes": ["brand", "code", "title", "description", "solution", "created_at"],
+    "log_patterns": ["title", "source", "pattern", "interpretation", "action",
+                     "created_at"],
+    "printers": ["model", "languages", "duplex", "trays", "memory", "ip",
+                 "location", "owner", "notes", "created_at"],
+    "roadmap_topics": ["topic", "category", "status", "progress", "note", "created_at"],
+    "habits": ["name", "target_days", "created_at"],
+    "habit_logs": ["habit_id", "log_date", "created_at"],
+    "templates": ["name", "content", "created_at"],
+    "checklists": ["title", "model", "cycle_days", "last_done", "note", "created_at"],
+    "edit_history": ["module", "ref_id", "action", "detail", "created_at"],
+}
+
+
+@app.route("/api/import", methods=["POST"])
+@login_required
+def import_data():
+    """从导出 JSON 恢复数据（INSERT OR IGNORE 幂等，已有记录不覆盖）。"""
+    f = request.files.get("file")
+    if not f:
+        return redirect(url_for("index"))
+    try:
+        payload = json.loads(f.read().decode("utf-8"))
+        data = payload.get("data", {})
+    except (ValueError, UnicodeDecodeError):
+        return redirect(url_for("index"))
+    db = get_db()
+    imported = 0
+    for table in IMPORT_TABLES:
+        rows = data.get(table, [])
+        if not isinstance(rows, list):
+            continue
+        table_cols = [r[1] for r in db.execute(
+            f"PRAGMA table_info({table})").fetchall()]
+        for row in rows:
+            if not row.get("id"):
+                continue
+            cols = [c for c in table_cols if c in row]
+            vals = [str(row[c]) if row[c] is not None else "" for c in cols]
+            placeholders = ",".join("?" * len(cols))
+            db.execute(
+                f"INSERT OR REPLACE INTO {table} ({','.join(cols)}) "
+                f"VALUES ({placeholders})", vals)
+            imported += 1
+    db.commit()
+    return redirect(url_for("index"))
+
+
 # ---------- 全局搜索 ----------
 
 @app.route("/search")
@@ -1852,7 +2138,18 @@ def weekly_report():
     resolved_bugs = db.execute(
         "SELECT * FROM bugs WHERE status='已解决' AND substr(created_at,1,10) "
         "BETWEEN ? AND ?", (ws, we)).fetchall()
-    lines = [f"工作周报（{ws} ~ {we}）", "", "一、本周工作内容"]
+    week_crashes = db.execute(
+        "SELECT COUNT(*) c FROM crashes WHERE substr(created_at,1,10) BETWEEN ? AND ?",
+        (ws, we)).fetchone()["c"]
+    week_tests = db.execute(
+        "SELECT COUNT(*) c FROM test_matrix WHERE substr(created_at,1,10) BETWEEN ? AND ?",
+        (ws, we)).fetchone()["c"]
+    week_drivers = db.execute(
+        "SELECT COUNT(*) c FROM drivers WHERE substr(created_at,1,10) BETWEEN ? AND ?",
+        (ws, we)).fetchone()["c"]
+    lines = [f"工作周报（{ws} ~ {we}）", "",
+             f"本周概览：新增崩溃档案 {week_crashes} 条，执行测试项 {week_tests} 项，"
+             f"登记驱动版本 {week_drivers} 个", "", "一、本周工作内容"]
     if logs:
         for i, log in enumerate(logs, 1):
             proj = f"[{log['project']}] " if log["project"] else ""
@@ -1909,6 +2206,21 @@ def quick_capture():
             db.execute(
                 "INSERT INTO bugs (title, platform, severity, status, created_at) "
                 "VALUES (?,?,?,?,?)", (body, "通用", "中", "待解决", now))
+        elif text.startswith("#错误码"):
+            body = text.split(" ", 1)[-1] if " " in text else text.lstrip("#错误码 ")
+            db.execute(
+                "INSERT INTO error_codes (brand, code, title, created_at) VALUES (?,?,?,?)",
+                ("通用/CUPS", body[:40], body, now))
+        elif text.startswith("#协议"):
+            body = text.split(" ", 1)[-1] if " " in text else text.lstrip("#协议 ")
+            db.execute(
+                "INSERT INTO protocols (title, protocol, summary, created_at) "
+                "VALUES (?,?,?,?)", (body[:80], "IPP", body, now))
+        elif text.startswith("#测试"):
+            body = text.split(" ", 1)[-1] if " " in text else text.lstrip("#测试 ")
+            db.execute(
+                "INSERT INTO test_matrix (driver_version, model, test_item, created_at) "
+                "VALUES (?,?,?,?)", ("未指定", "未指定", body, now))
         else:
             body = text.split(" ", 1)[-1] if text.startswith("#工作") and " " in text else text
             db.execute(
@@ -1949,6 +2261,7 @@ def export_data():
     db = get_db()
     tables = ["work_logs", "study_notes", "todos", "templates", "diaries",
               "drivers", "protocols", "test_matrix", "error_codes", "log_patterns", "printers",
+              "checklists", "edit_history",
               "habits", "habit_logs", "bugs", "roadmap_topics", "snippets",
               "releases", "interview_questions", "compile_errors",
               "perf_records", "commands", "books"]
