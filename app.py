@@ -12,8 +12,8 @@ import sqlite3
 from datetime import date, datetime, timedelta
 
 import markdown as md_lib
-from flask import (Flask, g, jsonify, redirect, render_template, request,
-                   session, url_for)
+from flask import (Flask, Response, g, jsonify, redirect, render_template,
+                   request, session, url_for)
 from markupsafe import Markup
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -131,6 +131,35 @@ CREATE TABLE IF NOT EXISTS compile_errors (
     tags TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS perf_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    target TEXT DEFAULT '',
+    before_metric TEXT DEFAULT '',
+    after_metric TEXT DEFAULT '',
+    technique TEXT DEFAULT '',
+    detail TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS commands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT DEFAULT '通用',
+    name TEXT NOT NULL,
+    command TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    author TEXT DEFAULT '',
+    category TEXT DEFAULT '技术',
+    total_pages INTEGER DEFAULT 0,
+    read_pages INTEGER DEFAULT 0,
+    status TEXT DEFAULT '在读',
+    note TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS = [
@@ -200,6 +229,26 @@ CPP_SNIPPETS = [
      "性能,工具"),
 ]
 
+# C++ 程序员预置命令速查（命令库为空时自动导入）
+CPP_COMMANDS = [
+    ("GDB", "启动调试", "gdb ./program", "加载可执行文件开始调试"),
+    ("GDB", "分析 core 文件", "gdb ./program core.1234", "事后分析崩溃现场，配合 bt full 查看完整堆栈"),
+    ("GDB", "条件断点", "break main.cpp:42 if count > 100", "仅在条件满足时中断"),
+    ("GDB", "观察点", "watch g_state", "变量被写入时立即中断，排查野写"),
+    ("GDB", "完整调用栈", "bt full", "显示调用栈及每帧局部变量"),
+    ("GDB", "线程切换", "thread apply all bt", "查看所有线程堆栈，排查死锁/竞态"),
+    ("perf", "CPU 热点分析", "perf record -g ./program && perf report", "采样调用图，定位 CPU 热点函数"),
+    ("perf", "实时热点", "perf top -p $(pgrep program)", "实时查看运行中进程的热点"),
+    ("Valgrind", "内存泄漏检测", "valgrind --leak-check=full --show-leak-kinds=all ./program", "优先处理 definitely lost 项"),
+    ("Sanitizer", "地址检测", "g++ -fsanitize=address -g main.cpp -o main", "ASan：越界访问、use-after-free、内存泄漏"),
+    ("Sanitizer", "线程竞态检测", "g++ -fsanitize=thread -g main.cpp -o main", "TSan：检测数据竞争，注意不能与 ASan 同开"),
+    ("CMake", "Debug 构建", "cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build -j", "标准 out-of-source 构建"),
+    ("CMake", "导出编译命令", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", "生成 compile_commands.json，供 clangd 代码补全使用"),
+    ("binutils", "查看符号表", "nm -C libxxx.a | grep symbol_name", "-C 反修饰 C++ 符号名，排查 undefined reference"),
+    ("binutils", "查看动态库依赖", "ldd ./program", "排查运行时找不到 so 的问题"),
+    ("binutils", "反汇编", "objdump -d -C ./program > asm.txt", "查看编译产物汇编，验证内联/优化效果"),
+]
+
 MOODS = ["😊", "😐", "😔", "😤", "🤔"]
 PLATFORMS = ["通用", "Linux 服务端", "嵌入式", "Qt", "Windows", "macOS",
              "Android", "iOS", "Web", "Flutter", "HarmonyOS"]
@@ -262,6 +311,11 @@ def init_db():
             "INSERT INTO snippets (title, language, code, tags, created_at) "
             "VALUES (?,?,?,?,?)",
             [(t, l, c, g, now) for t, l, c, g in CPP_SNIPPETS])
+    if db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 0:
+        db.executemany(
+            "INSERT INTO commands (category, name, command, description, created_at) "
+            "VALUES (?,?,?,?,?)",
+            [(c, n, cmd, d, now) for c, n, cmd, d in CPP_COMMANDS])
     db.commit()
     db.close()
 
@@ -976,6 +1030,147 @@ def del_compile_error(err_id):
     return redirect(url_for("compile_errors_page"))
 
 
+# ---------- 性能优化记录 ----------
+
+@app.route("/perf")
+@login_required
+def perf_page():
+    db = get_db()
+    rows = db.execute("SELECT * FROM perf_records ORDER BY id DESC").fetchall()
+    return render_template("perf.html", records=rows)
+
+
+@app.route("/api/perf", methods=["POST"])
+@login_required
+def add_perf():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO perf_records (title, target, before_metric, after_metric, "
+        "technique, detail, created_at) VALUES (?,?,?,?,?,?,?)",
+        (f["title"], f.get("target", ""), f.get("before_metric", ""),
+         f.get("after_metric", ""), f.get("technique", ""), f.get("detail", ""),
+         datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("perf_page"))
+
+
+@app.route("/api/perf/<int:record_id>/delete", methods=["POST"])
+@login_required
+def del_perf(record_id):
+    db = get_db()
+    db.execute("DELETE FROM perf_records WHERE id=?", (record_id,))
+    db.commit()
+    return redirect(url_for("perf_page"))
+
+
+# ---------- 命令速查 ----------
+
+@app.route("/commands")
+@login_required
+def commands_page():
+    cat = request.args.get("category", "").strip()
+    q = request.args.get("q", "").strip()
+    db = get_db()
+    categories = [r["category"] for r in db.execute(
+        "SELECT DISTINCT category FROM commands ORDER BY category").fetchall()]
+    sql = "SELECT * FROM commands WHERE 1=1"
+    params = []
+    if cat:
+        sql += " AND category=?"
+        params.append(cat)
+    if q:
+        sql += " AND (name LIKE ? OR command LIKE ? OR description LIKE ?)"
+        params += [f"%{q}%"] * 3
+    sql += " ORDER BY category, id"
+    rows = db.execute(sql, params).fetchall()
+    return render_template("commands.html", commands=rows, categories=categories,
+                           active_cat=cat, q=q)
+
+
+@app.route("/api/commands", methods=["POST"])
+@login_required
+def add_command():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO commands (category, name, command, description, created_at) "
+        "VALUES (?,?,?,?,?)",
+        (f.get("category") or "通用", f["name"], f["command"],
+         f.get("description", ""), datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("commands_page"))
+
+
+@app.route("/api/commands/<int:cmd_id>/delete", methods=["POST"])
+@login_required
+def del_command(cmd_id):
+    db = get_db()
+    db.execute("DELETE FROM commands WHERE id=?", (cmd_id,))
+    db.commit()
+    return redirect(url_for("commands_page"))
+
+
+# ---------- 读书笔记 ----------
+
+@app.route("/books")
+@login_required
+def books_page():
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM books ORDER BY CASE status WHEN '在读' THEN 0 WHEN '想读' THEN 1 "
+        "WHEN '读完' THEN 2 ELSE 3 END, id DESC").fetchall()
+    books = []
+    for r in rows:
+        d = dict(r)
+        d["percent"] = (min(100, round(d["read_pages"] * 100 / d["total_pages"]))
+                        if d["total_pages"] else 0)
+        books.append(d)
+    return render_template("books.html", books=books)
+
+
+@app.route("/api/books", methods=["POST"])
+@login_required
+def add_book():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO books (title, author, category, total_pages, read_pages, "
+        "status, note, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (f["title"], f.get("author", ""), f.get("category") or "技术",
+         int(f.get("total_pages") or 0), int(f.get("read_pages") or 0),
+         f.get("status", "在读"), f.get("note", ""),
+         datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("books_page"))
+
+
+@app.route("/api/books/<int:book_id>/progress", methods=["POST"])
+@login_required
+def update_book_progress(book_id):
+    db = get_db()
+    row = db.execute("SELECT * FROM books WHERE id=?", (book_id,)).fetchone()
+    if row:
+        read_pages = max(0, int(request.form.get("read_pages", 0)))
+        status = request.form.get("status", row["status"])
+        if row["total_pages"] and read_pages >= row["total_pages"]:
+            read_pages = row["total_pages"]
+            status = "读完"
+        db.execute("UPDATE books SET read_pages=?, status=? WHERE id=?",
+                   (read_pages, status, book_id))
+        db.commit()
+    return redirect(url_for("books_page"))
+
+
+@app.route("/api/books/<int:book_id>/delete", methods=["POST"])
+@login_required
+def del_book(book_id):
+    db = get_db()
+    db.execute("DELETE FROM books WHERE id=?", (book_id,))
+    db.commit()
+    return redirect(url_for("books_page"))
+
+
 # ---------- 回顾与周报 ----------
 
 @app.route("/review/weekly")
@@ -1098,7 +1293,38 @@ def api_stats():
         "snippets": db.execute("SELECT COUNT(*) c FROM snippets").fetchone()["c"],
         "interview_questions": db.execute(
             "SELECT COUNT(*) c FROM interview_questions").fetchone()["c"],
+        "compile_errors": db.execute(
+            "SELECT COUNT(*) c FROM compile_errors").fetchone()["c"],
+        "perf_records": db.execute("SELECT COUNT(*) c FROM perf_records").fetchone()["c"],
+        "commands": db.execute("SELECT COUNT(*) c FROM commands").fetchone()["c"],
+        "books": db.execute("SELECT COUNT(*) c FROM books").fetchone()["c"],
     })
+
+
+@app.route("/api/export")
+@login_required
+def export_data():
+    """一键导出全部数据为 JSON 备份文件。"""
+    db = get_db()
+    tables = ["work_logs", "study_notes", "todos", "templates", "diaries",
+              "habits", "habit_logs", "bugs", "roadmap_topics", "snippets",
+              "releases", "interview_questions", "compile_errors",
+              "perf_records", "commands", "books"]
+    data = {}
+    for t in tables:
+        try:
+            data[t] = [dict(r) for r in db.execute(f"SELECT * FROM {t}").fetchall()]
+        except sqlite3.OperationalError:
+            data[t] = []
+    payload = json.dumps({
+        "exported_at": datetime.now().isoformat(timespec="seconds"),
+        "data": data,
+    }, ensure_ascii=False, indent=2)
+    return Response(
+        payload, mimetype="application/json",
+        headers={"Content-Disposition":
+                 "attachment; filename=workbench_backup_"
+                 + date.today().isoformat() + ".json"})
 
 
 @app.route("/health")

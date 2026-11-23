@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}性能优化记录 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">⚡ 性能优化记录</h1>
+
+<section class="card">
+  <h2>记录优化案例</h2>
+  <form method="post" action="{{ url_for('add_perf') }}" class="form">
+    <div class="form-row">
+      <label class="grow">标题 <input type="text" name="title" required placeholder="如：启动耗时优化 / 接口 QPS 提升"></label>
+      <label>优化对象 <input type="text" name="target" placeholder="如：App 冷启动 / 订单查询接口" style="width:220px"></label>
+    </div>
+    <div class="form-row">
+      <label>优化前指标 <input type="text" name="before_metric" placeholder="如：1200ms / 500 QPS"></label>
+      <label>优化后指标 <input type="text" name="after_metric" placeholder="如：400ms / 3000 QPS"></label>
+      <label>技术手段 <input type="text" name="technique" placeholder="如：缓存友好 / 无锁化 / 预编译头" class="grow"></label>
+    </div>
+    <label>详细过程
+      <textarea name="detail" rows="3" placeholder="优化思路、profiling 发现、具体改动、踩坑记录…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存案例</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>优化案例库（{{ records|length }} 条）</h2>
+  {% if records %}
+  <div class="entries">
+    {% for r in records %}
+    <article class="entry">
+      <header>
+        <strong>{{ r.title }}</strong>
+        {% if r.target %}<span class="cat">{{ r.target }}</span>{% endif %}
+        <form method="post" action="{{ url_for('del_perf', record_id=r.id) }}" class="inline" onsubmit="return confirm('删除该优化案例？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if r.before_metric or r.after_metric %}
+      <p class="entry-body perf-metrics">
+        <span class="metric-before">{{ r.before_metric or '—' }}</span>
+        <span class="metric-arrow">→</span>
+        <span class="metric-after">{{ r.after_metric or '—' }}</span>
+        {% if r.technique %}<span class="tag">{{ r.technique }}</span>{% endif %}
+      </p>
+      {% endif %}
+      {% if r.detail %}<p class="entry-body">{{ r.detail }}</p>{% endif %}
+      <footer class="entry-foot"><span class="muted">记录于 {{ r.created_at[:16] }}</span></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">还没有优化案例，记录你的第一次性能优化吧。</p>{% endif %}
+</section>
+{% endblock %}

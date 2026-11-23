@@ -282,6 +282,19 @@ body {
   padding: 3px 12px; border-radius: 12px; font-family: Consolas, Monaco, monospace;
 }
 
+/* 性能优化指标 */
+.perf-metrics { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.metric-before {
+  background: #fdecea; color: #e74c3c; padding: 3px 12px; border-radius: 8px;
+  font-family: Consolas, Monaco, monospace; font-size: 13px; font-weight: 600;
+}
+.metric-arrow { color: #8a94a6; font-weight: 600; }
+.metric-after {
+  background: #eef7ee; color: #27ae60; padding: 3px 12px; border-radius: 8px;
+  font-family: Consolas, Monaco, monospace; font-size: 13px; font-weight: 600;
+}
+.err-msg { font-family: Consolas, Monaco, monospace; font-size: 13px; }
+
 .empty { color: #a8b3c2; font-size: 14px; padding: 12px 0; }
 .footer {
   text-align: center; color: #a8b3c2; font-size: 13px; padding: 18px 0;

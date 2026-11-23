@@ -21,10 +21,14 @@
         <a href="{{ url_for('roadmap_page') }}" class="{{ 'active' if request.endpoint == 'roadmap_page' }}">学习路线</a>
         <a href="{{ url_for('snippets_page') }}" class="{{ 'active' if request.endpoint == 'snippets_page' }}">代码片段</a>
         <a href="{{ url_for('compile_errors_page') }}" class="{{ 'active' if request.endpoint == 'compile_errors_page' }}">编译错误</a>
+        <a href="{{ url_for('perf_page') }}" class="{{ 'active' if request.endpoint == 'perf_page' }}">性能优化</a>
+        <a href="{{ url_for('commands_page') }}" class="{{ 'active' if request.endpoint == 'commands_page' }}">命令速查</a>
+        <a href="{{ url_for('books_page') }}" class="{{ 'active' if request.endpoint == 'books_page' }}">读书</a>
         <a href="{{ url_for('releases_page') }}" class="{{ 'active' if request.endpoint == 'releases_page' }}">发版</a>
         <a href="{{ url_for('interview_page') }}" class="{{ 'active' if request.endpoint == 'interview_page' }}">面试题</a>
         <a href="{{ url_for('weekly_review') }}" class="{{ 'active' if request.endpoint == 'weekly_review' }}">回顾</a>
         <a href="{{ url_for('weekly_report') }}" class="{{ 'active' if request.endpoint == 'weekly_report' }}">周报</a>
+        <a href="{{ url_for('export_data') }}" title="导出全部数据为 JSON">导出</a>
         <a href="{{ url_for('logout') }}" class="logout-link">退出</a>
       </div>
     </div>

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}读书笔记 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">📖 读书笔记</h1>
+
+<section class="card">
+  <h2>添加书目</h2>
+  <form method="post" action="{{ url_for('add_book') }}" class="form">
+    <div class="form-row">
+      <label class="grow">书名 <input type="text" name="title" required placeholder="如：Effective C++"></label>
+      <label>作者 <input type="text" name="author" placeholder="Scott Meyers" style="width:160px"></label>
+      <label>分类 <input type="text" name="category" placeholder="技术" style="width:110px"></label>
+    </div>
+    <div class="form-row">
+      <label>总页数 <input type="number" name="total_pages" min="0" placeholder="如：320" style="width:110px"></label>
+      <label>已读页数 <input type="number" name="read_pages" min="0" value="0" style="width:110px"></label>
+      <label>状态
+        <select name="status">
+          <option selected>在读</option><option>想读</option><option>读完</option><option>弃读</option>
+        </select>
+      </label>
+      <label class="grow">笔记/心得 <input type="text" name="note" placeholder="一句短评，详细笔记建议记入学习笔记模块"></label>
+    </div>
+    <button type="submit" class="btn">添加书目</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>书架（{{ books|length }} 本）</h2>
+  {% if books %}
+  <div class="entries">
+    {% for b in books %}
+    <article class="entry">
+      <header>
+        <span class="status-chip st-{{ '已掌握' if b.status == '读完' else ('进行中' if b.status == '在读' else '未开始') }}">{{ b.status }}</span>
+        <strong>{{ b.title }}</strong>
+        {% if b.author %}<span class="muted">{{ b.author }}</span>{% endif %}
+        <span class="cat">{{ b.category }}</span>
+        <form method="post" action="{{ url_for('del_book', book_id=b.id) }}" class="inline" onsubmit="return confirm('删除这本书？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if b.note %}<p class="entry-body">{{ b.note }}</p>{% endif %}
+      <footer class="entry-foot">
+        {% if b.total_pages %}
+        <form method="post" action="{{ url_for('update_book_progress', book_id=b.id) }}" class="inline mastery-form">
+          <span class="progress"><i style="width:{{ b.percent }}%"></i></span>
+          <input type="number" name="read_pages" min="0" max="{{ b.total_pages }}" value="{{ b.read_pages }}">
+          <span class="muted">/ {{ b.total_pages }} 页（{{ b.percent }}%）</span>
+          <button class="btn btn-sm" type="submit">更新进度</button>
+        </form>
+        {% else %}
+        <span class="muted">未设置页数</span>
+        {% endif %}
+      </footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">书架还是空的，添加第一本书开始阅读之旅。</p>{% endif %}
+</section>
+{% endblock %}
