@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}学习笔记 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">📚 学习笔记</h1>
+
+<section class="card">
+  <h2>新增笔记</h2>
+  <form method="post" action="{{ url_for('add_study') }}" class="form">
+    <div class="form-row">
+      <label class="grow">主题 <input type="text" name="topic" required placeholder="学了什么"></label>
+      <label>分类 <input type="text" name="category" placeholder="如：Python / 英语 / 考证" list="cat-list">
+        <datalist id="cat-list">
+          {% for c in categories %}<option value="{{ c }}">{% endfor %}
+        </datalist>
+      </label>
+      <label>掌握度 <input type="number" name="mastery" min="0" max="100" value="0" style="width:80px"> %</label>
+    </div>
+    <label>参考链接 <input type="url" name="link" placeholder="https://..."></label>
+    <label>笔记内容
+      <textarea name="content" rows="3" placeholder="知识点摘要、心得、疑问…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存笔记</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>全部笔记（{{ notes|length }} 条）<span class="muted">带 ⏰ 的表示今日应复习</span></h2>
+  <div class="filter-bar">
+    <a class="chip {{ 'on' if not active_cat }}" href="{{ url_for('study_page') }}">全部</a>
+    {% for c in categories %}
+    <a class="chip {{ 'on' if active_cat == c }}" href="{{ url_for('study_page', category=c) }}">{{ c }}</a>
+    {% endfor %}
+  </div>
+  {% if notes %}
+  <div class="entries">
+    {% for note in notes %}
+    <article class="entry">
+      <header>
+        <span class="cat">{{ note.category }}</span>
+        <strong>{{ note.topic }}</strong>
+        {% if note.next_review and note.next_review <= today %}<span class="due-badge">⏰ 待复习</span>{% endif %}
+        {% if note.link %}<a class="link" href="{{ note.link }}" target="_blank" rel="noopener">🔗 资料</a>{% endif %}
+        <form method="post" action="{{ url_for('del_study', note_id=note.id) }}" class="inline" onsubmit="return confirm('确定删除这条笔记？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if note.content %}<p class="entry-body">{{ note.content }}</p>{% endif %}
+      <footer class="entry-foot">
+        <form method="post" action="{{ url_for('update_mastery', note_id=note.id) }}" class="inline mastery-form">
+          <span class="progress"><i style="width:{{ note.mastery }}%"></i></span>
+          <input type="number" name="mastery" min="0" max="100" value="{{ note.mastery }}">
+          <button class="btn btn-sm" type="submit">更新掌握度</button>
+        </form>
+        <form method="post" action="{{ url_for('mark_reviewed', note_id=note.id) }}" class="inline">
+          <button class="btn btn-sm btn-ghost" type="submit">已复习 ✓</button>
+        </form>
+        <span class="muted">第 {{ note.review_stage }} 轮复习{% if note.next_review %} · 下次复习 {{ note.next_review }}{% endif %}</span>
+      </footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">该分类下暂无笔记。</p>{% endif %}
+</section>
+{% endblock %}

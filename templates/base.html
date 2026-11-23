@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}个人工作台{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container nav-inner">
+      <a class="brand" href="{{ url_for('index') }}">🗂 个人工作台</a>
+      <div class="nav-links">
+        <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint == 'index' }}">概览</a>
+        <a href="{{ url_for('work_page') }}" class="{{ 'active' if request.endpoint == 'work_page' }}">工作记录</a>
+        <a href="{{ url_for('study_page') }}" class="{{ 'active' if request.endpoint == 'study_page' }}">学习笔记</a>
+        <a href="{{ url_for('todo_page') }}" class="{{ 'active' if request.endpoint == 'todo_page' }}">待办事项</a>
+        <a href="{{ url_for('weekly_review') }}" class="{{ 'active' if request.endpoint == 'weekly_review' }}">每周回顾</a>
+        <a href="{{ url_for('logout') }}" class="logout-link">退出</a>
+      </div>
+    </div>
+  </nav>
+  <main class="container main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">个人工作台 · Flask + SQLite · {{ now }}</footer>
+</body>
+</html>

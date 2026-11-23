@@ -1,0 +1,14 @@
+# 敏感文件（含登录密码哈希与初始密码，禁止提交）
+auth.json
+INITIAL_PASSWORD.txt
+
+# 日志
+*.log
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 数据库默认路径在 /root/workbench.db（仓库外），若移动到项目内也忽略
+*.db
+*.db.bak

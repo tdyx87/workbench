@@ -1,0 +1,9 @@
+# gunicorn 配置
+bind = "0.0.0.0:8000"
+workers = 2
+threads = 2
+timeout = 60
+accesslog = "/root/workbench/gunicorn_access.log"
+errorlog = "/root/workbench/gunicorn_error.log"
+loglevel = "info"
+proc_name = "workbench"

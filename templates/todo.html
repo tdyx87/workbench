@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}待办事项 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">✅ 待办事项</h1>
+
+<section class="card">
+  <h2>新增待办</h2>
+  <form method="post" action="{{ url_for('add_todo') }}" class="form">
+    <div class="form-row">
+      <label class="grow">事项 <input type="text" name="title" required placeholder="要做什么"></label>
+      <label>优先级
+        <select name="priority">
+          <option>高</option>
+          <option selected>中</option>
+          <option>低</option>
+        </select>
+      </label>
+      <label>项目 <input type="text" name="project" placeholder="所属项目" list="proj-list" style="width:140px">
+        <datalist id="proj-list">
+          {% for p in projects %}<option value="{{ p }}">{% endfor %}
+        </datalist>
+      </label>
+      <label>截止日期 <input type="date" name="due_date"></label>
+    </div>
+    <button type="submit" class="btn">添加待办</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>待办列表（{{ todos|length }} 项）</h2>
+  {% if todos %}
+  <ul class="todo-list">
+    {% for t in todos %}
+    <li class="todo-item {{ 'done' if t.done }}">
+      <form method="post" action="{{ url_for('toggle_todo', todo_id=t.id) }}" class="inline">
+        <button class="check" title="切换完成状态">{{ '✓' if t.done else '○' }}</button>
+      </form>
+      <span class="prio prio-{{ t.priority }}">{{ t.priority }}</span>
+      <span class="title">{{ t.title }}</span>
+      {% if t.project %}<span class="proj">{{ t.project }}</span>{% endif %}
+      {% if t.due_date %}
+      <span class="due {{ 'overdue' if (not t.done) and t.due_date < now_str }}">截止 {{ t.due_date }}</span>
+      {% endif %}
+      <form method="post" action="{{ url_for('del_todo', todo_id=t.id) }}" class="inline" onsubmit="return confirm('删除该待办？')">
+        <button class="btn-del" title="删除">×</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="empty">暂无待办事项。</p>{% endif %}
+</section>
+{% endblock %}

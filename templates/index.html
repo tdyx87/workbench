@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}概览 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">工作台概览 <span class="muted">今天是 {{ today }}</span></h1>
+
+<section class="card quick-card">
+  <form method="post" action="{{ url_for('quick_capture') }}" class="quick-form">
+    <input type="text" name="text" required autocomplete="off"
+           placeholder="⚡ 快捷记录：直接输入记入工作记录；以『#学习 』开头记入学习笔记；以『#待办 』开头记入待办">
+    <button type="submit" class="btn">记录</button>
+  </form>
+</section>
+
+<div class="stats-grid">
+  <div class="stat-card"><div class="stat-num">{{ stats.work_count }}</div><div class="stat-label">工作记录</div></div>
+  <div class="stat-card"><div class="stat-num">{{ stats.study_count }}</div><div class="stat-label">学习笔记</div></div>
+  <div class="stat-card warn"><div class="stat-num">{{ stats.todo_open }}</div><div class="stat-label">进行中待办</div></div>
+  <div class="stat-card ok"><div class="stat-num">{{ stats.todo_done }}</div><div class="stat-label">已完成待办</div></div>
+</div>
+
+{% if due_reviews %}
+<section class="card review-alert">
+  <h2>🔔 今日待复习（{{ due_reviews|length }} 篇）<span class="muted">按艾宾浩斯记忆曲线安排</span></h2>
+  <ul class="list">
+    {% for note in due_reviews %}
+    <li>
+      <span class="cat">{{ note.category }}</span>
+      <span class="title">{{ note.topic }}</span>
+      <span class="muted">应复习日期 {{ note.next_review }}</span>
+      <form method="post" action="{{ url_for('mark_reviewed', note_id=note.id) }}" class="inline">
+        <button class="btn btn-sm" type="submit">已复习 ✓</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<div class="grid-2">
+  <section class="card">
+    <h2>📋 最近工作记录 <a class="more" href="{{ url_for('work_page') }}">全部 →</a></h2>
+    {% if recent_logs %}
+    <ul class="list">
+      {% for log in recent_logs %}
+      <li>
+        <span class="date">{{ log.log_date }}</span>
+        <span class="title">{{ log.title }}</span>
+        {% if log.project %}<span class="proj">{{ log.project }}</span>{% endif %}
+        {% if log.tags %}<span class="tag">{{ log.tags }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="empty">暂无工作记录，用上方快捷记录写第一条吧。</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>📚 最近学习笔记 <a class="more" href="{{ url_for('study_page') }}">全部 →</a></h2>
+    {% if recent_notes %}
+    <ul class="list">
+      {% for note in recent_notes %}
+      <li>
+        <span class="cat">{{ note.category }}</span>
+        <span class="title">{{ note.topic }}</span>
+        <span class="progress-mini"><i style="width:{{ note.mastery }}%"></i></span>
+        <span class="muted">{{ note.mastery }}%</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="empty">暂无学习笔记。</p>{% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>✅ 进行中的待办 <a class="more" href="{{ url_for('todo_page') }}">管理 →</a></h2>
+  {% if open_todos %}
+  <ul class="list">
+    {% for t in open_todos %}
+    <li>
+      <span class="prio prio-{{ t.priority }}">{{ t.priority }}</span>
+      <span class="title">{{ t.title }}</span>
+      {% if t.project %}<span class="proj">{{ t.project }}</span>{% endif %}
+      {% if t.due_date %}<span class="muted">截止 {{ t.due_date }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="empty">太棒了，没有未完成的待办事项。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>🔥 打卡热力图 <span class="muted">近 70 天的工作记录 + 学习笔记活动</span></h2>
+  <div class="heatmap">
+    {% for cell in heatmap %}
+    <span class="hm-cell lv{{ cell.level }}" title="{{ cell.date }}：{{ cell.count }} 条记录"></span>
+    {% endfor %}
+  </div>
+  <div class="hm-legend">
+    <span class="muted">少</span>
+    <span class="hm-cell lv0"></span><span class="hm-cell lv1"></span>
+    <span class="hm-cell lv2"></span><span class="hm-cell lv3"></span>
+    <span class="muted">多</span>
+  </div>
+</section>
+{% endblock %}

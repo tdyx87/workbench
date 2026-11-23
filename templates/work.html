@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}工作记录 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">📋 工作记录</h1>
+
+<section class="card">
+  <h2>新增记录</h2>
+  {% if templates %}
+  <div class="tpl-bar">
+    <span class="muted">套用模板：</span>
+    {% for t in templates %}
+    <a class="chip" href="{{ url_for('work_page', tpl=t.id) }}">{{ t.name }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <form method="post" action="{{ url_for('add_work') }}" class="form">
+    <div class="form-row">
+      <label>日期 <input type="date" name="log_date" value="{{ today }}"></label>
+      <label class="grow">标题 <input type="text" name="title" required placeholder="今天做了什么" value="{{ tpl_data.title if tpl_data else '' }}"></label>
+      <label>项目 <input type="text" name="project" placeholder="所属项目" list="proj-list" style="width:140px">
+        <datalist id="proj-list">
+          {% for p in projects %}<option value="{{ p }}">{% endfor %}
+        </datalist>
+      </label>
+      <label>标签 <input type="text" name="tags" placeholder="如：项目A,会议" value="{{ tpl_data.tags if tpl_data else '' }}"></label>
+    </div>
+    <label>详细内容
+      <textarea name="content" rows="4" placeholder="工作详情、产出、遇到的问题…">{{ tpl_data.content if tpl_data else '' }}</textarea>
+    </label>
+    <button type="submit" class="btn">保存记录</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>历史记录（{{ logs|length }} 条）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索标题 / 内容 / 标签">
+    <select name="project">
+      <option value="">全部项目</option>
+      {% for p in projects %}
+      <option value="{{ p }}" {{ 'selected' if project == p }}>{{ p }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+    {% if q or project %}<a class="btn btn-sm btn-ghost" href="{{ url_for('work_page') }}">清除</a>{% endif %}
+  </form>
+  {% if logs %}
+  <div class="entries">
+    {% for log in logs %}
+    <article class="entry">
+      <header>
+        <span class="date">{{ log.log_date }}</span>
+        <strong>{{ log.title }}</strong>
+        {% if log.project %}<span class="proj">{{ log.project }}</span>{% endif %}
+        {% if log.tags %}{% for t in log.tags.split(',') %}<span class="tag">{{ t.strip() }}</span>{% endfor %}{% endif %}
+        <form method="post" action="{{ url_for('del_work', log_id=log.id) }}" class="inline" onsubmit="return confirm('确定删除这条记录？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if log.content %}<p class="entry-body">{{ log.content }}</p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的记录。</p>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}每周回顾 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🗓 每周回顾 <span class="muted">{{ week_start }} ~ {{ week_end }}</span></h1>
+
+<div class="stats-grid">
+  <div class="stat-card"><div class="stat-num">{{ logs|length }}</div><div class="stat-label">本周工作记录</div></div>
+  <div class="stat-card"><div class="stat-num">{{ notes|length }}</div><div class="stat-label">本周新增笔记</div></div>
+  <div class="stat-card ok"><div class="stat-num">{{ reviewed|length }}</div><div class="stat-label">本周完成复习</div></div>
+  <div class="stat-card warn"><div class="stat-num">{{ open_todos|length }}</div><div class="stat-label">待办剩余</div></div>
+</div>
+
+<section class="card">
+  <h2>📋 本周工作记录</h2>
+  {% if logs %}
+  <div class="entries">
+    {% for log in logs %}
+    <article class="entry">
+      <header>
+        <span class="date">{{ log.log_date }}</span>
+        <strong>{{ log.title }}</strong>
+        {% if log.project %}<span class="proj">{{ log.project }}</span>{% endif %}
+      </header>
+      {% if log.content %}<p class="entry-body">{{ log.content }}</p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">本周还没有工作记录。</p>{% endif %}
+</section>
+
+<div class="grid-2">
+  <section class="card">
+    <h2>📚 本周新增笔记</h2>
+    {% if notes %}
+    <ul class="list">
+      {% for n in notes %}
+      <li><span class="cat">{{ n.category }}</span><span class="title">{{ n.topic }}</span><span class="muted">{{ n.mastery }}%</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="empty">本周没有新增学习笔记。</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>🔁 本周完成复习</h2>
+    {% if reviewed %}
+    <ul class="list">
+      {% for n in reviewed %}
+      <li><span class="cat">{{ n.category }}</span><span class="title">{{ n.topic }}</span><span class="muted">第 {{ n.review_stage }} 轮</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="empty">本周还没有完成复习。</p>{% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>⏳ 未完成待办（下周跟进）</h2>
+  {% if open_todos %}
+  <ul class="list">
+    {% for t in open_todos %}
+    <li>
+      <span class="prio prio-{{ t.priority }}">{{ t.priority }}</span>
+      <span class="title">{{ t.title }}</span>
+      {% if t.due_date %}<span class="muted">截止 {{ t.due_date }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="empty">没有遗留待办，下周轻松开始。</p>{% endif %}
+</section>
+{% endblock %}
