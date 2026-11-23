@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}打印协议笔记 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">📡 打印协议笔记库</h1>
+<section class="card">
+  <h2>记录协议笔记</h2>
+  <form method="post" action="{{ url_for('add_protocol') }}" class="form">
+    <div class="form-row">
+      <label class="grow">标题 <input type="text" name="title" required placeholder="如：IPP Get-Printer-Attributes 属性协商流程"></label>
+      <label>协议
+        <select name="protocol">
+          {% for p in protocol_list %}<option>{{ p }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>核心要点
+      <textarea name="summary" rows="3" placeholder="协议交互流程、关键字段、版本差异…"></textarea>
+    </label>
+    <label>命令/指令示例
+      <textarea name="commands" rows="4" placeholder="IPP 属性、PJL 指令片段、抓包过滤表达式…" style="font-family:Consolas,Monaco,monospace"></textarea>
+    </label>
+    <label>备注
+      <textarea name="notes" rows="2" placeholder="踩坑记录、参考资料链接…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存笔记</button>
+  </form>
+</section>
+<section class="card">
+  <h2>协议笔记（{{ protocols|length }} 条）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索标题 / 要点 / 命令 / 备注">
+    <select name="protocol">
+      <option value="">全部协议</option>
+      {% for p in protocol_list %}<option value="{{ p }}" {{ 'selected' if active_protocol == p }}>{{ p }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if protocols %}
+  <div class="entries">
+    {% for p in protocols %}
+    <article class="entry">
+      <header>
+        <span class="signal-badge">{{ p.protocol }}</span>
+        <strong>{{ p.title }}</strong>
+        <form method="post" action="{{ url_for('del_protocol', proto_id=p.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该协议笔记？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if p.summary %}<p class="entry-body">{{ p.summary }}</p>{% endif %}
+      {% if p.commands %}<pre class="snippet-code">{{ p.commands }}</pre>{% endif %}
+      {% if p.notes %}<p class="entry-body"><b>备注：</b>{{ p.notes }}</p>{% endif %}
+      <footer class="entry-foot"><span class="muted">记录于 {{ p.created_at[:16] }}</span></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的协议笔记。</p>{% endif %}
+</section>
+{% endblock %}

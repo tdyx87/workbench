@@ -171,6 +171,36 @@ CREATE TABLE IF NOT EXISTS crashes (
     status TEXT DEFAULT '待分析',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS drivers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model TEXT NOT NULL,
+    driver_version TEXT DEFAULT '',
+    firmware_version TEXT DEFAULT '',
+    release_date TEXT DEFAULT '',
+    changes TEXT DEFAULT '',
+    known_issues TEXT DEFAULT '',
+    recommend TEXT DEFAULT '待验证',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS protocols (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    protocol TEXT DEFAULT 'IPP',
+    summary TEXT DEFAULT '',
+    commands TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS test_matrix (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    driver_version TEXT NOT NULL,
+    model TEXT NOT NULL,
+    test_item TEXT NOT NULL,
+    result TEXT DEFAULT '未测',
+    tester TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS = [
@@ -327,6 +357,13 @@ def init_db():
             "INSERT INTO commands (category, name, command, description, created_at) "
             "VALUES (?,?,?,?,?)",
             [(c, n, cmd, d, now) for c, n, cmd, d in CPP_COMMANDS])
+    for c, n, cmd, d in PRINT_COMMANDS:
+        if not db.execute(
+                "SELECT 1 FROM commands WHERE name=? AND category=?",
+                (n, c)).fetchone():
+            db.execute(
+                "INSERT INTO commands (category, name, command, description, created_at) "
+                "VALUES (?,?,?,?,?)", (c, n, cmd, d, now))
     db.commit()
     db.close()
 
@@ -1241,6 +1278,207 @@ def del_crash(crash_id):
     return redirect(url_for("crashes_page"))
 
 
+# ---------- 打印调试命令（预置） ----------
+
+PRINT_COMMANDS = [
+    ("打印调试", "查看打印队列", "lpstat -o", "CUPS：列出当前所有打印任务及状态"),
+    ("打印调试", "清空打印队列", "cancel -a", "CUPS：取消全部排队任务，队列卡死时使用"),
+    ("打印调试", "开启 CUPS 调试日志", "cupsctl --debug-logging", "开启后日志写入 /var/log/cups/error_log，排查驱动问题必备"),
+    ("打印调试", "查看 CUPS 错误日志", "tail -50 /var/log/cups/error_log", "过滤 [Job N] 可定位某个打印任务的完整流程"),
+    ("打印调试", "IPP 属性探测", "ipptool -tv ipp://printer-ip/ ipp-everywhere.test", "探测打印机支持的 IPP 属性与能力集"),
+    ("打印调试", "抓取 9100 端口原始数据", "tcpdump -i any -w /tmp/p9100.pcap port 9100", "抓 JetDirect/RAW 协议数据流，分析驱动下发的 PCL/PJL 指令"),
+    ("打印调试", "Wireshark 过滤 IPP", "tcp.port == 631 || ipp", "IPP 走 631 端口；配合抓包分析属性协商过程"),
+    ("打印调试", "重启打印服务(Linux)", "systemctl restart cups", "驱动安装/卸载后需重启 CUPS 生效"),
+    ("打印调试", "重启打印服务(Windows)", "net stop spooler && net start spooler", "假脱机假死、队列卡住的通用修复"),
+    ("打印调试", "Windows 清理 spool 目录", "del /q %SystemRoot%\\System32\\spool\\PRINTERS\\*", "停 spooler 后执行，清除损坏的排队任务"),
+    ("打印调试", "CUPS 添加打印机", "lpadmin -p name -E -v ipp://ip/ipp -m everywhere", "用 IPP Everywhere 无驱动模式添加网络打印机"),
+    ("打印调试", "发送原始打印数据", "lp -d printer -o raw file.pcl", "绕过过滤器直接下发，验证打印机对语言的解析"),
+    ("打印调试", "查看打印机属性", "lpoptions -p printer -l", "列出驱动注册的所有可配置项（纸张/双面/分辨率等）"),
+    ("打印调试", "PPD 语法检查", "cupstestppd -v driver.ppd", "验证自定义 PPD 文件是否符合规范"),
+    ("打印调试", "Windows 驱动包管理", "printbrm -b -f backup.cab", "备份/还原打印机驱动与端口配置"),
+    ("打印调试", "PJL 状态查询", "@PJL INFO STATUS", "向 9100 端口发送 PJL 指令查询打印机状态（USTATUS 可订阅事件）"),
+]
+
+
+# ---------- 驱动/固件版本台账 ----------
+
+DRIVER_RECOMMENDS = ["待验证", "推荐", "有坑"]
+
+
+@app.route("/drivers")
+@login_required
+def drivers_page():
+    recommend = request.args.get("recommend", "").strip()
+    q = request.args.get("q", "").strip()
+    db = get_db()
+    sql = "SELECT * FROM drivers WHERE 1=1"
+    params = []
+    if recommend:
+        sql += " AND recommend=?"
+        params.append(recommend)
+    if q:
+        sql += " AND (model LIKE ? OR driver_version LIKE ? OR changes LIKE ? OR known_issues LIKE ?)"
+        params += [f"%{q}%"] * 4
+    sql += " ORDER BY id DESC"
+    drivers = db.execute(sql, params).fetchall()
+    return render_template("drivers.html", drivers=drivers, q=q,
+                           active_recommend=recommend,
+                           recommends=DRIVER_RECOMMENDS)
+
+
+@app.route("/api/drivers", methods=["POST"])
+@login_required
+def add_driver():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO drivers (model, driver_version, firmware_version, release_date, "
+        "changes, known_issues, recommend, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (f["model"], f.get("driver_version", ""), f.get("firmware_version", ""),
+         f.get("release_date", ""), f.get("changes", ""), f.get("known_issues", ""),
+         f.get("recommend", "待验证"), datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("drivers_page"))
+
+
+@app.route("/api/drivers/<int:driver_id>/recommend", methods=["POST"])
+@login_required
+def cycle_driver_recommend(driver_id):
+    db = get_db()
+    db.execute(
+        "UPDATE drivers SET recommend = CASE recommend "
+        "WHEN '待验证' THEN '推荐' WHEN '推荐' THEN '有坑' ELSE '待验证' END "
+        "WHERE id=?", (driver_id,))
+    db.commit()
+    return redirect(request.referrer or url_for("drivers_page"))
+
+
+@app.route("/api/drivers/<int:driver_id>/delete", methods=["POST"])
+@login_required
+def del_driver(driver_id):
+    db = get_db()
+    db.execute("DELETE FROM drivers WHERE id=?", (driver_id,))
+    db.commit()
+    return redirect(url_for("drivers_page"))
+
+
+# ---------- 打印协议笔记库 ----------
+
+PROTOCOL_LIST = ["IPP", "LPR", "JetDirect/9100", "PCL", "PJL", "PostScript", "USB打印类", "SMB", "WSD", "AirPrint/mDNS"]
+
+
+@app.route("/protocols")
+@login_required
+def protocols_page():
+    proto = request.args.get("protocol", "").strip()
+    q = request.args.get("q", "").strip()
+    db = get_db()
+    sql = "SELECT * FROM protocols WHERE 1=1"
+    params = []
+    if proto:
+        sql += " AND protocol=?"
+        params.append(proto)
+    if q:
+        sql += " AND (title LIKE ? OR summary LIKE ? OR commands LIKE ? OR notes LIKE ?)"
+        params += [f"%{q}%"] * 4
+    sql += " ORDER BY id DESC"
+    protocols = db.execute(sql, params).fetchall()
+    return render_template("protocols.html", protocols=protocols, q=q,
+                           active_protocol=proto, protocol_list=PROTOCOL_LIST)
+
+
+@app.route("/api/protocols", methods=["POST"])
+@login_required
+def add_protocol():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO protocols (title, protocol, summary, commands, notes, created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (f["title"], f.get("protocol", "IPP"), f.get("summary", ""),
+         f.get("commands", ""), f.get("notes", ""),
+         datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("protocols_page"))
+
+
+@app.route("/api/protocols/<int:proto_id>/delete", methods=["POST"])
+@login_required
+def del_protocol(proto_id):
+    db = get_db()
+    db.execute("DELETE FROM protocols WHERE id=?", (proto_id,))
+    db.commit()
+    return redirect(url_for("protocols_page"))
+
+
+# ---------- 打印测试矩阵 ----------
+
+TEST_RESULTS = ["未测", "通过", "失败", "阻塞"]
+
+
+@app.route("/test_matrix")
+@login_required
+def test_matrix_page():
+    version = request.args.get("version", "").strip()
+    result = request.args.get("result", "").strip()
+    q = request.args.get("q", "").strip()
+    db = get_db()
+    sql = "SELECT * FROM test_matrix WHERE 1=1"
+    params = []
+    if version:
+        sql += " AND driver_version=?"
+        params.append(version)
+    if result:
+        sql += " AND result=?"
+        params.append(result)
+    if q:
+        sql += " AND (model LIKE ? OR test_item LIKE ? OR note LIKE ?)"
+        params += [f"%{q}%"] * 3
+    sql += " ORDER BY driver_version DESC, model, id DESC"
+    items = db.execute(sql, params).fetchall()
+    versions = [r[0] for r in db.execute(
+        "SELECT DISTINCT driver_version FROM test_matrix ORDER BY driver_version DESC").fetchall()]
+    return render_template("test_matrix.html", items=items, q=q,
+                           active_version=version, active_result=result,
+                           versions=versions, results=TEST_RESULTS)
+
+
+@app.route("/api/test_matrix", methods=["POST"])
+@login_required
+def add_test_item():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO test_matrix (driver_version, model, test_item, result, tester, note, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (f["driver_version"], f["model"], f["test_item"],
+         f.get("result", "未测"), f.get("tester", ""), f.get("note", ""),
+         datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("test_matrix_page"))
+
+
+@app.route("/api/test_matrix/<int:item_id>/result", methods=["POST"])
+@login_required
+def cycle_test_result(item_id):
+    db = get_db()
+    db.execute(
+        "UPDATE test_matrix SET result = CASE result "
+        "WHEN '未测' THEN '通过' WHEN '通过' THEN '失败' WHEN '失败' THEN '阻塞' ELSE '未测' END "
+        "WHERE id=?", (item_id,))
+    db.commit()
+    return redirect(request.referrer or url_for("test_matrix_page"))
+
+
+@app.route("/api/test_matrix/<int:item_id>/delete", methods=["POST"])
+@login_required
+def del_test_item(item_id):
+    db = get_db()
+    db.execute("DELETE FROM test_matrix WHERE id=?", (item_id,))
+    db.commit()
+    return redirect(url_for("test_matrix_page"))
+
+
 # ---------- 全局搜索 ----------
 
 @app.route("/search")
@@ -1287,6 +1525,18 @@ def global_search():
         results["crashes"] = db.execute(
             "SELECT * FROM crashes WHERE title LIKE ? OR stack LIKE ? OR root_cause LIKE ? "
             "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
+        results["drivers"] = db.execute(
+            "SELECT * FROM drivers WHERE model LIKE ? OR driver_version LIKE ? OR changes LIKE ? "
+            "OR known_issues LIKE ? ORDER BY id DESC LIMIT 10",
+            (like, like, like, like)).fetchall()
+        results["protocols"] = db.execute(
+            "SELECT * FROM protocols WHERE title LIKE ? OR summary LIKE ? OR commands LIKE ? "
+            "OR notes LIKE ? ORDER BY id DESC LIMIT 10",
+            (like, like, like, like)).fetchall()
+        results["test_matrix"] = db.execute(
+            "SELECT * FROM test_matrix WHERE driver_version LIKE ? OR model LIKE ? "
+            "OR test_item LIKE ? OR note LIKE ? ORDER BY id DESC LIMIT 10",
+            (like, like, like, like)).fetchall()
         results = {k: v for k, v in results.items() if v}
     total = sum(len(v) for v in results.values())
     return render_template("search.html", q=q, results=results, total=total)
@@ -1443,6 +1693,7 @@ def export_data():
     """一键导出全部数据为 JSON 备份文件。"""
     db = get_db()
     tables = ["work_logs", "study_notes", "todos", "templates", "diaries",
+              "drivers", "protocols", "test_matrix",
               "habits", "habit_logs", "bugs", "roadmap_topics", "snippets",
               "releases", "interview_questions", "compile_errors",
               "perf_records", "commands", "books"]

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}驱动版本台账 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🖨 驱动/固件版本台账</h1>
+<section class="card">
+  <h2>登记版本</h2>
+  <form method="post" action="{{ url_for('add_driver') }}" class="form">
+    <div class="form-row">
+      <label class="grow">机型 <input type="text" name="model" required placeholder="如：HP LaserJet Pro M404"></label>
+      <label>驱动版本 <input type="text" name="driver_version" placeholder="如：48.4.4588" style="width:130px"></label>
+      <label>固件版本 <input type="text" name="firmware_version" placeholder="如：2408A" style="width:110px"></label>
+      <label>发布日期 <input type="date" name="release_date"></label>
+      <label>推荐状态
+        <select name="recommend">
+          {% for r in recommends %}<option>{{ r }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>变更摘要
+      <textarea name="changes" rows="2" placeholder="本版本修复/新增内容…"></textarea>
+    </label>
+    <label>已知问题
+      <textarea name="known_issues" rows="2" placeholder="双面打印偏移 / 某纸张类型崩溃 / 升级后队列异常…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存版本</button>
+  </form>
+</section>
+<section class="card">
+  <h2>版本台账（{{ drivers|length }} 条）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索机型 / 版本 / 变更 / 已知问题">
+    <select name="recommend">
+      <option value="">全部状态</option>
+      {% for r in recommends %}<option value="{{ r }}" {{ 'selected' if active_recommend == r }}>{{ r }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if drivers %}
+  <div class="entries">
+    {% for d in drivers %}
+    <article class="entry">
+      <header>
+        <span class="cat">{{ d.model }}</span>
+        {% if d.driver_version %}<strong>驱动 {{ d.driver_version }}</strong>{% endif %}
+        {% if d.firmware_version %}<span class="muted">固件 {{ d.firmware_version }}</span>{% endif %}
+        <span class="bug-status {{ 'resolved' if d.recommend == '推荐' }}">{{ d.recommend }}</span>
+        <form method="post" action="{{ url_for('cycle_driver_recommend', driver_id=d.id) }}" class="inline">
+          <button class="btn btn-sm btn-ghost" type="submit" title="待验证 → 推荐 → 有坑">切换状态</button>
+        </form>
+        <form method="post" action="{{ url_for('del_driver', driver_id=d.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该版本记录？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if d.changes %}<p class="entry-body"><b>变更：</b>{{ d.changes }}</p>{% endif %}
+      {% if d.known_issues %}<p class="entry-body"><b>已知问题：</b>{{ d.known_issues }}</p>{% endif %}
+      <footer class="entry-foot">
+        {% if d.release_date %}<span class="muted">发布 {{ d.release_date }}</span>{% endif %}
+        <span class="muted">记录于 {{ d.created_at[:16] }}</span>
+      </footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的版本记录。</p>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}打印测试矩阵 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🧪 打印测试矩阵</h1>
+<section class="card">
+  <h2>登记测试项</h2>
+  <form method="post" action="{{ url_for('add_test_item') }}" class="form">
+    <div class="form-row">
+      <label>驱动版本 <input type="text" name="driver_version" required placeholder="如：48.4.4588" style="width:130px"></label>
+      <label class="grow">机型 <input type="text" name="model" required placeholder="如：HP LaserJet Pro M404"></label>
+      <label class="grow">测试项 <input type="text" name="test_item" required placeholder="如：双面打印 / 缩放 50% / 多份逐份"></label>
+      <label>结果
+        <select name="result">
+          {% for r in results %}<option>{{ r }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>测试人 <input type="text" name="tester" placeholder="选填" style="width:90px"></label>
+    </div>
+    <label>备注
+      <textarea name="note" rows="2" placeholder="失败现象、复现步骤、关联 Bug…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存测试项</button>
+  </form>
+</section>
+<section class="card">
+  <h2>测试矩阵（{{ items|length }} 条）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索机型 / 测试项 / 备注">
+    <select name="version">
+      <option value="">全部版本</option>
+      {% for v in versions %}<option value="{{ v }}" {{ 'selected' if active_version == v }}>{{ v }}</option>{% endfor %}
+    </select>
+    <select name="result">
+      <option value="">全部结果</option>
+      {% for r in results %}<option value="{{ r }}" {{ 'selected' if active_result == r }}>{{ r }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if items %}
+  <div class="entries">
+    {% for t in items %}
+    <article class="entry">
+      <header>
+        <span class="cat">{{ t.driver_version }}</span>
+        <span class="cat">{{ t.model }}</span>
+        <strong>{{ t.test_item }}</strong>
+        <span class="bug-status {{ 'resolved' if t.result == '通过' }}">{{ t.result }}</span>
+        <form method="post" action="{{ url_for('cycle_test_result', item_id=t.id) }}" class="inline">
+          <button class="btn btn-sm btn-ghost" type="submit" title="未测 → 通过 → 失败 → 阻塞">切换结果</button>
+        </form>
+        <form method="post" action="{{ url_for('del_test_item', item_id=t.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该测试项？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if t.note %}<p class="entry-body">{{ t.note }}</p>{% endif %}
+      <footer class="entry-foot">
+        {% if t.tester %}<span class="muted">测试人 {{ t.tester }}</span>{% endif %}
+        <span class="muted">记录于 {{ t.created_at[:16] }}</span>
+      </footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的测试项。</p>{% endif %}
+</section>
+{% endblock %}
