@@ -295,6 +295,49 @@ body {
 }
 .err-msg { font-family: Consolas, Monaco, monospace; font-size: 13px; }
 
+/* 崩溃信号 / 搜索分组 */
+.signal-badge {
+  background: #fdecea; color: #c0392b; font-size: 12px; font-weight: 700;
+  padding: 2px 10px; border-radius: 8px; font-family: Consolas, Monaco, monospace;
+}
+.search-group { font-size: 15px; margin: 18px 0 8px; padding-top: 10px; border-top: 1px dashed #e6eaf0; }
+.search-group:first-of-type { border-top: none; padding-top: 0; }
+.search-link { color: #2c3e50; text-decoration: none; }
+.search-link:hover { color: #4a90d9; text-decoration: underline; }
+
+/* 暗色模式 */
+html.dark body { background: #1a1d23; color: #d5dbe5; }
+html.dark .navbar { background: #12151a; }
+html.dark .card, html.dark .stat-card, html.dark .login-card { background: #242832; color: #d5dbe5; }
+html.dark .stat-num, html.dark .entry header strong, html.dark .entry-body b,
+html.dark .search-link { color: #e8eef4; }
+html.dark .form input, html.dark .form textarea, html.dark .form select,
+html.dark .search-bar input, html.dark .search-bar select, html.dark .quick-form input {
+  background: #1a1d23; border-color: #3a4150; color: #d5dbe5;
+}
+html.dark .form input:focus, html.dark .form textarea:focus, html.dark .quick-form input:focus {
+  border-color: #4a90d9; background: #12151a;
+}
+html.dark .login-card input { background: #f5f6f8; color: #2c3e50; }
+html.dark .list li, html.dark .entries .entry, html.dark .todo-item,
+html.dark .habit-item { border-bottom-color: #333a47; }
+html.dark .search-group { border-top-color: #333a47; }
+html.dark .btn-ghost, html.dark .chip, html.dark .progress, html.dark .progress-mini {
+  background: #333a47; color: #aab3c2;
+}
+html.dark .chip.on { background: #4a90d9; color: #fff; }
+html.dark .hm-cell.lv0 { background: #333a47; }
+html.dark .tag, html.dark .cat, html.dark .proj { opacity: .85; }
+html.dark .report-box { background: #1a1d23; border-color: #3a4150; color: #d5dbe5; }
+html.dark .snippet-code { background: #12151a; }
+html.dark .mastery-form input { background: #1a1d23; border-color: #3a4150; color: #d5dbe5; }
+html.dark .footer { background: #12151a; border-top-color: #333a47; }
+html.dark .timeline::before { background: #333a47; }
+html.dark .timeline-dot { border-color: #242832; }
+html.dark .prio-低 { background: #333a47; }
+html.dark .st-未开始 { background: #333a47; }
+.theme-toggle { font-size: 16px; }
+
 .empty { color: #a8b3c2; font-size: 14px; padding: 12px 0; }
 .footer {
   text-align: center; color: #a8b3c2; font-size: 13px; padding: 18px 0;

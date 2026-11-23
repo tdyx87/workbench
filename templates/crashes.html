@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}崩溃分析档案 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">💥 崩溃分析档案</h1>
+
+<section class="card">
+  <h2>记录崩溃案例</h2>
+  <form method="post" action="{{ url_for('add_crash') }}" class="form">
+    <div class="form-row">
+      <label class="grow">标题 <input type="text" name="title" required placeholder="如：空指针导致服务崩溃"></label>
+      <label>模块 <input type="text" name="module" placeholder="如：网络库 / UI 层" style="width:150px"></label>
+      <label>信号
+        <select name="signal">
+          <option value="">未知</option>
+          {% for s in signals %}<option>{{ s }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>状态
+        <select name="status">
+          <option selected>待分析</option><option>已修复</option>
+        </select>
+      </label>
+    </div>
+    <label>关键堆栈
+      <textarea name="stack" rows="4" placeholder="gdb bt 关键帧、addr2line 定位结果…" style="font-family:Consolas,Monaco,monospace"></textarea>
+    </label>
+    <label>根因分析
+      <textarea name="root_cause" rows="2" placeholder="野指针 / 越界 / 竞态 / 生命周期问题…"></textarea>
+    </label>
+    <label>修复方案
+      <textarea name="fix" rows="2" placeholder="修复方式、预防措施…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存档案</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>崩溃档案（{{ crashes|length }} 条）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索标题 / 堆栈 / 根因 / 模块">
+    <select name="status">
+      <option value="">全部状态</option>
+      <option value="待分析" {{ 'selected' if active_status == '待分析' }}>待分析</option>
+      <option value="已修复" {{ 'selected' if active_status == '已修复' }}>已修复</option>
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if crashes %}
+  <div class="entries">
+    {% for c in crashes %}
+    <article class="entry">
+      <header>
+        {% if c.signal %}<span class="signal-badge">{{ c.signal }}</span>{% endif %}
+        {% if c.module %}<span class="cat">{{ c.module }}</span>{% endif %}
+        <strong class="{{ 'solved' if c.status == '已修复' }}">{{ c.title }}</strong>
+        <span class="bug-status {{ 'resolved' if c.status == '已修复' }}">{{ c.status }}</span>
+        <form method="post" action="{{ url_for('resolve_crash', crash_id=c.id) }}" class="inline">
+          <button class="btn btn-sm {{ 'btn-ghost' if c.status == '已修复' }}" type="submit">
+            {{ '重新打开' if c.status == '已修复' else '标记修复 ✓' }}
+          </button>
+        </form>
+        <form method="post" action="{{ url_for('del_crash', crash_id=c.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该崩溃档案？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if c.stack %}<pre class="snippet-code">{{ c.stack }}</pre>{% endif %}
+      {% if c.root_cause %}<p class="entry-body"><b>根因：</b>{{ c.root_cause }}</p>{% endif %}
+      {% if c.fix %}<p class="entry-body"><b>修复：</b>{{ c.fix }}</p>{% endif %}
+      <footer class="entry-foot"><span class="muted">记录于 {{ c.created_at[:16] }}</span></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的崩溃档案。</p>{% endif %}
+</section>
+{% endblock %}

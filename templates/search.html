@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}全局搜索 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🔍 全局搜索</h1>
+
+<section class="card">
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索所有模块：工作记录、笔记、待办、日记、Bug、片段、命令、报错、面试题、性能、读书、崩溃…" autofocus>
+    <button type="submit" class="btn">搜索</button>
+  </form>
+</section>
+
+{% if q %}
+<section class="card">
+  <h2>『{{ q }}』的搜索结果（{{ total }} 条）</h2>
+  {% if results %}
+
+  {% if results.work_logs %}
+  <h3 class="search-group">📋 工作记录</h3>
+  <ul class="list">
+    {% for r in results.work_logs %}
+    <li><span class="date">{{ r.log_date }}</span><a class="search-link" href="{{ url_for('work_page', q=q) }}">{{ r.title }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.study_notes %}
+  <h3 class="search-group">📚 学习笔记</h3>
+  <ul class="list">
+    {% for r in results.study_notes %}
+    <li><span class="cat">{{ r.category }}</span><a class="search-link" href="{{ url_for('study_page') }}">{{ r.topic }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.todos %}
+  <h3 class="search-group">✅ 待办事项</h3>
+  <ul class="list">
+    {% for r in results.todos %}
+    <li><span class="prio prio-{{ r.priority }}">{{ r.priority }}</span><a class="search-link" href="{{ url_for('todo_page') }}">{{ r.title }}</a>{% if r.done %}<span class="muted">（已完成）</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.diaries %}
+  <h3 class="search-group">📔 日记</h3>
+  <ul class="list">
+    {% for r in results.diaries %}
+    <li><span class="date">{{ r.diary_date }}</span><a class="search-link" href="{{ url_for('diary_page') }}">{{ r.content[:60] }}{% if r.content|length > 60 %}…{% endif %}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.bugs %}
+  <h3 class="search-group">🐛 Bug 追踪</h3>
+  <ul class="list">
+    {% for r in results.bugs %}
+    <li><span class="cat">{{ r.platform }}</span><a class="search-link" href="{{ url_for('bugs_page', q=q) }}">{{ r.title }}</a><span class="bug-status {{ 'resolved' if r.status == '已解决' }}">{{ r.status }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.snippets %}
+  <h3 class="search-group">✂️ 代码片段</h3>
+  <ul class="list">
+    {% for r in results.snippets %}
+    <li><span class="cat">{{ r.language }}</span><a class="search-link" href="{{ url_for('snippets_page', q=q) }}">{{ r.title }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.commands %}
+  <h3 class="search-group">⌨️ 命令速查</h3>
+  <ul class="list">
+    {% for r in results.commands %}
+    <li><span class="cat">{{ r.category }}</span><a class="search-link" href="{{ url_for('commands_page', q=q) }}">{{ r.name }}</a><span class="muted">{{ r.command[:50] }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.compile_errors %}
+  <h3 class="search-group">🔧 编译错误</h3>
+  <ul class="list">
+    {% for r in results.compile_errors %}
+    <li><span class="cat">{{ r.compiler }}</span><a class="search-link" href="{{ url_for('compile_errors_page', q=q) }}">{{ r.error_msg }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.interview_questions %}
+  <h3 class="search-group">💼 面试题集</h3>
+  <ul class="list">
+    {% for r in results.interview_questions %}
+    <li><span class="cat">{{ r.category }}</span><a class="search-link" href="{{ url_for('interview_page') }}">{{ r.question }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.perf_records %}
+  <h3 class="search-group">⚡ 性能优化</h3>
+  <ul class="list">
+    {% for r in results.perf_records %}
+    <li><a class="search-link" href="{{ url_for('perf_page') }}">{{ r.title }}</a>{% if r.target %}<span class="cat">{{ r.target }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.books %}
+  <h3 class="search-group">📖 读书笔记</h3>
+  <ul class="list">
+    {% for r in results.books %}
+    <li><a class="search-link" href="{{ url_for('books_page') }}">{{ r.title }}</a>{% if r.author %}<span class="muted">{{ r.author }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if results.crashes %}
+  <h3 class="search-group">💥 崩溃档案</h3>
+  <ul class="list">
+    {% for r in results.crashes %}
+    <li>{% if r.signal %}<span class="signal-badge">{{ r.signal }}</span>{% endif %}<a class="search-link" href="{{ url_for('crashes_page', q=q) }}">{{ r.title }}</a><span class="bug-status {{ 'resolved' if r.status == '已修复' }}">{{ r.status }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% else %}<p class="empty">没有找到与『{{ q }}』相关的内容。</p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

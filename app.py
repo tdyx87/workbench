@@ -160,6 +160,17 @@ CREATE TABLE IF NOT EXISTS books (
     note TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS crashes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    module TEXT DEFAULT '',
+    signal TEXT DEFAULT '',
+    stack TEXT DEFAULT '',
+    root_cause TEXT DEFAULT '',
+    fix TEXT DEFAULT '',
+    status TEXT DEFAULT '待分析',
+    created_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS = [
@@ -1169,6 +1180,131 @@ def del_book(book_id):
     db.execute("DELETE FROM books WHERE id=?", (book_id,))
     db.commit()
     return redirect(url_for("books_page"))
+
+
+# ---------- 崩溃分析档案 ----------
+
+CRASH_SIGNALS = ["SIGSEGV", "SIGABRT", "SIGBUS", "SIGFPE", "SIGILL", "其他"]
+
+
+@app.route("/crashes")
+@login_required
+def crashes_page():
+    status = request.args.get("status", "").strip()
+    q = request.args.get("q", "").strip()
+    db = get_db()
+    sql = "SELECT * FROM crashes WHERE 1=1"
+    params = []
+    if status:
+        sql += " AND status=?"
+        params.append(status)
+    if q:
+        sql += " AND (title LIKE ? OR stack LIKE ? OR root_cause LIKE ? OR module LIKE ?)"
+        params += [f"%{q}%"] * 4
+    sql += " ORDER BY CASE status WHEN '待分析' THEN 0 ELSE 1 END, id DESC"
+    rows = db.execute(sql, params).fetchall()
+    return render_template("crashes.html", crashes=rows, signals=CRASH_SIGNALS,
+                           active_status=status, q=q)
+
+
+@app.route("/api/crashes", methods=["POST"])
+@login_required
+def add_crash():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO crashes (title, module, signal, stack, root_cause, fix, "
+        "status, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (f["title"], f.get("module", ""), f.get("signal", ""),
+         f.get("stack", ""), f.get("root_cause", ""), f.get("fix", ""),
+         f.get("status", "待分析"), datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("crashes_page"))
+
+
+@app.route("/api/crashes/<int:crash_id>/resolve", methods=["POST"])
+@login_required
+def resolve_crash(crash_id):
+    db = get_db()
+    db.execute("UPDATE crashes SET status = CASE status WHEN '待分析' THEN '已修复' "
+               "ELSE '待分析' END WHERE id=?", (crash_id,))
+    db.commit()
+    return redirect(request.referrer or url_for("crashes_page"))
+
+
+@app.route("/api/crashes/<int:crash_id>/delete", methods=["POST"])
+@login_required
+def del_crash(crash_id):
+    db = get_db()
+    db.execute("DELETE FROM crashes WHERE id=?", (crash_id,))
+    db.commit()
+    return redirect(url_for("crashes_page"))
+
+
+# ---------- 全局搜索 ----------
+
+@app.route("/search")
+@login_required
+def global_search():
+    q = request.args.get("q", "").strip()
+    results = {}
+    if q:
+        like = f"%{q}%"
+        db = get_db()
+        results["work_logs"] = db.execute(
+            "SELECT * FROM work_logs WHERE title LIKE ? OR content LIKE ? OR tags LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
+        results["study_notes"] = db.execute(
+            "SELECT * FROM study_notes WHERE topic LIKE ? OR content LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
+        results["todos"] = db.execute(
+            "SELECT * FROM todos WHERE title LIKE ? ORDER BY id DESC LIMIT 10",
+            (like,)).fetchall()
+        results["diaries"] = db.execute(
+            "SELECT * FROM diaries WHERE content LIKE ? ORDER BY diary_date DESC LIMIT 10",
+            (like,)).fetchall()
+        results["bugs"] = db.execute(
+            "SELECT * FROM bugs WHERE title LIKE ? OR phenomenon LIKE ? OR solution LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
+        results["snippets"] = db.execute(
+            "SELECT * FROM snippets WHERE title LIKE ? OR code LIKE ? OR tags LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
+        results["commands"] = db.execute(
+            "SELECT * FROM commands WHERE name LIKE ? OR command LIKE ? OR description LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
+        results["compile_errors"] = db.execute(
+            "SELECT * FROM compile_errors WHERE error_msg LIKE ? OR solution LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
+        results["interview_questions"] = db.execute(
+            "SELECT * FROM interview_questions WHERE question LIKE ? OR answer LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
+        results["perf_records"] = db.execute(
+            "SELECT * FROM perf_records WHERE title LIKE ? OR detail LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
+        results["books"] = db.execute(
+            "SELECT * FROM books WHERE title LIKE ? OR note LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
+        results["crashes"] = db.execute(
+            "SELECT * FROM crashes WHERE title LIKE ? OR stack LIKE ? OR root_cause LIKE ? "
+            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
+        results = {k: v for k, v in results.items() if v}
+    total = sum(len(v) for v in results.values())
+    return render_template("search.html", q=q, results=results, total=total)
+
+
+# ---------- PWA ----------
+
+@app.route("/manifest.json")
+def pwa_manifest():
+    return jsonify({
+        "name": "个人工作台",
+        "short_name": "工作台",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#f0f2f5",
+        "theme_color": "#2c3e50",
+        "description": "个人工作台：工作记录、学习笔记、待办与知识管理",
+    })
 
 
 # ---------- 回顾与周报 ----------

@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}个人工作台{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="manifest" href="{{ url_for('pwa_manifest') }}">
+  <meta name="theme-color" content="#2c3e50">
+  <script>
+    if (localStorage.getItem('wb-theme') === 'dark') {
+      document.documentElement.classList.add('dark');
+    }
+    function toggleTheme() {
+      const dark = document.documentElement.classList.toggle('dark');
+      localStorage.setItem('wb-theme', dark ? 'dark' : 'light');
+    }
+  </script>
 </head>
 <body>
   <nav class="navbar">
@@ -24,11 +35,14 @@
         <a href="{{ url_for('perf_page') }}" class="{{ 'active' if request.endpoint == 'perf_page' }}">性能优化</a>
         <a href="{{ url_for('commands_page') }}" class="{{ 'active' if request.endpoint == 'commands_page' }}">命令速查</a>
         <a href="{{ url_for('books_page') }}" class="{{ 'active' if request.endpoint == 'books_page' }}">读书</a>
+        <a href="{{ url_for('crashes_page') }}" class="{{ 'active' if request.endpoint == 'crashes_page' }}">崩溃</a>
         <a href="{{ url_for('releases_page') }}" class="{{ 'active' if request.endpoint == 'releases_page' }}">发版</a>
         <a href="{{ url_for('interview_page') }}" class="{{ 'active' if request.endpoint == 'interview_page' }}">面试题</a>
         <a href="{{ url_for('weekly_review') }}" class="{{ 'active' if request.endpoint == 'weekly_review' }}">回顾</a>
         <a href="{{ url_for('weekly_report') }}" class="{{ 'active' if request.endpoint == 'weekly_report' }}">周报</a>
+        <a href="{{ url_for('global_search') }}" class="{{ 'active' if request.endpoint == 'global_search' }}">搜索</a>
         <a href="{{ url_for('export_data') }}" title="导出全部数据为 JSON">导出</a>
+        <a href="javascript:void(0)" onclick="toggleTheme()" title="切换暗色模式" class="theme-toggle">🌓</a>
         <a href="{{ url_for('logout') }}" class="logout-link">退出</a>
       </div>
     </div>
