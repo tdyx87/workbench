@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}日志分析笔记 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🔍 打印日志分析笔记</h1>
+<section class="card">
+  <h2>记录日志模式</h2>
+  <form method="post" action="{{ url_for('add_log_pattern') }}" class="form">
+    <div class="form-row">
+      <label class="grow">标题 <input type="text" name="title" required placeholder="如：CUPS filter 崩溃导致任务中断"></label>
+      <label>日志来源
+        <select name="source">
+          {% for s in sources %}<option>{{ s }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>典型日志片段 / 错误模式
+      <textarea name="pattern" rows="4" placeholder="粘贴关键日志行，如 [Job 123] Filter failed / PID xxx crashed…" style="font-family:Consolas,Monaco,monospace"></textarea>
+    </label>
+    <label>含义解读
+      <textarea name="interpretation" rows="2" placeholder="该日志说明什么：哪个环节出问题、驱动还是数据、影响范围…"></textarea>
+    </label>
+    <label>处理动作
+      <textarea name="action" rows="2" placeholder="下一步排查动作、修复方式…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存笔记</button>
+  </form>
+</section>
+<section class="card">
+  <h2>日志模式库（{{ patterns|length }} 条）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索标题 / 日志片段 / 解读 / 动作">
+    <select name="source">
+      <option value="">全部来源</option>
+      {% for s in sources %}
+      <option value="{{ s }}" {{ 'selected' if active_source == s }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if patterns %}
+  <div class="entries">
+    {% for p in patterns %}
+    <article class="entry">
+      <header>
+        <span class="signal-badge">{{ p.source }}</span>
+        <strong>{{ p.title }}</strong>
+        <form method="post" action="{{ url_for('del_log_pattern', pattern_id=p.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该日志笔记？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if p.pattern %}<pre class="snippet-code">{{ p.pattern }}</pre>{% endif %}
+      {% if p.interpretation %}<p class="entry-body"><b>解读：</b>{{ p.interpretation }}</p>{% endif %}
+      {% if p.action %}<p class="entry-body"><b>处理：</b>{{ p.action }}</p>{% endif %}
+      <footer class="entry-foot"><span class="muted">记录于 {{ p.created_at[:16] }}</span></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的日志笔记。</p>{% endif %}
+</section>
+{% endblock %}

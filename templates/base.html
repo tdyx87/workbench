@@ -39,6 +39,9 @@
         <a href="{{ url_for('drivers_page') }}" class="{{ 'active' if request.endpoint == 'drivers_page' }}">驱动</a>
         <a href="{{ url_for('protocols_page') }}" class="{{ 'active' if request.endpoint == 'protocols_page' }}">协议</a>
         <a href="{{ url_for('test_matrix_page') }}" class="{{ 'active' if request.endpoint == 'test_matrix_page' }}">测试矩阵</a>
+        <a href="{{ url_for('error_codes_page') }}" class="{{ 'active' if request.endpoint == 'error_codes_page' }}">错误码</a>
+        <a href="{{ url_for('log_analysis_page') }}" class="{{ 'active' if request.endpoint == 'log_analysis_page' }}">日志</a>
+        <a href="{{ url_for('printers_page') }}" class="{{ 'active' if request.endpoint == 'printers_page' }}">机型</a>
         <a href="{{ url_for('releases_page') }}" class="{{ 'active' if request.endpoint == 'releases_page' }}">发版</a>
         <a href="{{ url_for('interview_page') }}" class="{{ 'active' if request.endpoint == 'interview_page' }}">面试题</a>
         <a href="{{ url_for('weekly_review') }}" class="{{ 'active' if request.endpoint == 'weekly_review' }}">回顾</a>

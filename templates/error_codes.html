@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}错误码速查 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🚨 打印机错误码速查</h1>
+<section class="card">
+  <h2>录入错误码</h2>
+  <form method="post" action="{{ url_for('add_error_code') }}" class="form">
+    <div class="form-row">
+      <label>品牌
+        <select name="brand">
+          {% for b in brands %}<option>{{ b }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>错误码 <input type="text" name="code" required placeholder="如：49.4C02 / SC542" style="width:150px"></label>
+      <label class="grow">标题 <input type="text" name="title" placeholder="如：固件数据处理错误"></label>
+    </div>
+    <label>故障描述
+      <textarea name="description" rows="2" placeholder="触发条件、典型场景、涉及的部件…"></textarea>
+    </label>
+    <label>排查与解决方案
+      <textarea name="solution" rows="2" placeholder="排查步骤、修复方法、是否需要更换部件…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存错误码</button>
+  </form>
+</section>
+<section class="card">
+  <h2>错误码库（{{ codes|length }} 条）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索错误码 / 描述 / 方案">
+    <select name="brand">
+      <option value="">全部品牌</option>
+      {% for b in brands %}
+      <option value="{{ b }}" {{ 'selected' if active_brand == b }}>{{ b }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if codes %}
+  <div class="entries">
+    {% for c in codes %}
+    <article class="entry">
+      <header>
+        <span class="cat">{{ c.brand }}</span>
+        <span class="version-badge">{{ c.code }}</span>
+        <strong>{{ c.title }}</strong>
+        <form method="post" action="{{ url_for('del_error_code', code_id=c.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该错误码？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      {% if c.description %}<p class="entry-body"><b>描述：</b>{{ c.description }}</p>{% endif %}
+      {% if c.solution %}<p class="entry-body"><b>方案：</b>{{ c.solution }}</p>{% endif %}
+      <footer class="entry-foot"><span class="muted">记录于 {{ c.created_at[:16] }}</span></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的错误码。</p>{% endif %}
+</section>
+{% endblock %}

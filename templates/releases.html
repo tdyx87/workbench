@@ -21,6 +21,22 @@
   </form>
 </section>
 
+{% if pending_tests %}
+<section class="card review-alert">
+  <h2>⚠️ 发版回归提醒（{{ pending_tests|length }} 项未通过）<span class="muted">来自测试矩阵，发版前请确认</span></h2>
+  <ul class="list">
+    {% for t in pending_tests %}
+    <li>
+      <span class="cat">{{ t.driver_version }}</span>
+      <span class="cat">{{ t.model }}</span>
+      <span class="title">{{ t.test_item }}</span>
+      <span class="bug-status {{ 'resolved' if t.result == '通过' }}">{{ t.result }}</span>
+      {% if t.note %}<span class="muted">{{ t.note }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 <section class="card">
   <h2>发版时间线（{{ releases|length }} 次）</h2>
   {% if releases %}

@@ -201,6 +201,37 @@ CREATE TABLE IF NOT EXISTS test_matrix (
     note TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS error_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    brand TEXT DEFAULT '通用/CUPS',
+    code TEXT NOT NULL,
+    title TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    solution TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS log_patterns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    source TEXT DEFAULT 'CUPS error_log',
+    pattern TEXT DEFAULT '',
+    interpretation TEXT DEFAULT '',
+    action TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS printers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model TEXT NOT NULL,
+    languages TEXT DEFAULT '',
+    duplex TEXT DEFAULT '',
+    trays TEXT DEFAULT '',
+    memory TEXT DEFAULT '',
+    ip TEXT DEFAULT '',
+    location TEXT DEFAULT '',
+    owner TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS = [
@@ -364,6 +395,18 @@ def init_db():
             db.execute(
                 "INSERT INTO commands (category, name, command, description, created_at) "
                 "VALUES (?,?,?,?,?)", (c, n, cmd, d, now))
+    for col in ("driver_version", "model"):
+        try:
+            db.execute(f"ALTER TABLE bugs ADD COLUMN {col} TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+    for b, code, t, desc, sol in ERROR_CODES_SEED:
+        if not db.execute(
+                "SELECT 1 FROM error_codes WHERE brand=? AND code=?",
+                (b, code)).fetchone():
+            db.execute(
+                "INSERT INTO error_codes (brand, code, title, description, solution, created_at) "
+                "VALUES (?,?,?,?,?,?)", (b, code, t, desc, sol, now))
     db.commit()
     db.close()
 
@@ -469,6 +512,12 @@ def index():
         "todo_done": db.execute("SELECT COUNT(*) c FROM todos WHERE done=1").fetchone()["c"],
         "bug_open": db.execute(
             "SELECT COUNT(*) c FROM bugs WHERE status='待解决'").fetchone()["c"],
+        "driver_pending": db.execute(
+            "SELECT COUNT(*) c FROM drivers WHERE recommend='待验证'").fetchone()["c"],
+        "test_untested": db.execute(
+            "SELECT COUNT(*) c FROM test_matrix WHERE result='未测'").fetchone()["c"],
+        "crash_pending": db.execute(
+            "SELECT COUNT(*) c FROM crashes WHERE status='待分析'").fetchone()["c"],
     }
     recent_logs = db.execute(
         "SELECT * FROM work_logs ORDER BY log_date DESC, id DESC LIMIT 5").fetchall()
@@ -789,12 +838,18 @@ def bugs_page():
         sql += " AND status=?"
         params.append(status)
     if q:
-        sql += " AND (title LIKE ? OR phenomenon LIKE ? OR solution LIKE ?)"
-        params += [f"%{q}%"] * 3
+        sql += " AND (title LIKE ? OR phenomenon LIKE ? OR solution LIKE ? OR model LIKE ? OR driver_version LIKE ?)"
+        params += [f"%{q}%"] * 5
     sql += " ORDER BY CASE status WHEN '待解决' THEN 0 ELSE 1 END, " \
            "CASE severity WHEN '高' THEN 0 WHEN '中' THEN 1 ELSE 2 END, id DESC"
     rows = db.execute(sql, params).fetchall()
+    driver_versions = [r[0] for r in db.execute(
+        "SELECT DISTINCT driver_version FROM drivers WHERE driver_version!='' "
+        "ORDER BY driver_version DESC").fetchall()]
+    printer_models = [r[0] for r in db.execute(
+        "SELECT model FROM printers ORDER BY model").fetchall()]
     return render_template("bugs.html", bugs=rows, platforms=PLATFORMS,
+                           driver_versions=driver_versions, printer_models=printer_models,
                            active_platform=platform, active_status=status, q=q)
 
 
@@ -805,10 +860,11 @@ def add_bug():
     db = get_db()
     db.execute(
         "INSERT INTO bugs (title, platform, severity, phenomenon, root_cause, "
-        "solution, status, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        "solution, status, driver_version, model, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (f["title"], f.get("platform", "通用"), f.get("severity", "中"),
          f.get("phenomenon", ""), f.get("root_cause", ""), f.get("solution", ""),
-         f.get("status", "待解决"), datetime.now().isoformat(timespec="seconds")))
+         f.get("status", "待解决"), f.get("driver_version", ""), f.get("model", ""),
+         datetime.now().isoformat(timespec="seconds")))
     db.commit()
     return redirect(url_for("bugs_page"))
 
@@ -940,7 +996,10 @@ def releases_page():
     db = get_db()
     rows = db.execute(
         "SELECT * FROM releases ORDER BY release_date DESC, id DESC").fetchall()
-    return render_template("releases.html", releases=rows,
+    pending_tests = db.execute(
+        "SELECT * FROM test_matrix WHERE result!='通过' ORDER BY "
+        "CASE result WHEN '失败' THEN 0 WHEN '阻塞' THEN 1 ELSE 2 END, id DESC").fetchall()
+    return render_template("releases.html", releases=rows, pending_tests=pending_tests,
                            today=date.today().isoformat())
 
 
@@ -1479,6 +1538,189 @@ def del_test_item(item_id):
     return redirect(url_for("test_matrix_page"))
 
 
+# ---------- 错误码速查库 ----------
+
+ERROR_BRANDS = ["HP", "佳能", "爱普生", "兄弟", "理光", "京瓷", "富士施乐", "通用/CUPS"]
+
+ERROR_CODES_SEED = [
+    ("HP", "49.4C02", "固件数据处理错误",
+     "多由特定打印任务中的异常数据触发，队列中残留任务会反复复发",
+     "清空打印队列后重试；升级固件；换用 PCL6/PS 驱动交叉验证是否为驱动生成的数据问题"),
+    ("HP", "50.x", "定影组件热故障",
+     "50.1 低温 / 50.2 预热超时 / 50.9 高温，多为定影组件老化或供电异常",
+     "断电冷却后重试；确认电源电压；必要时更换定影组件"),
+    ("HP", "79", "固件服务错误",
+     "常由网络环境中的异常任务或广播流量触发",
+     "升级固件；改 USB 直连隔离验证；排查网络中的异常任务源"),
+    ("HP", "59.F0", "主电机/转印组件故障",
+     "ITB 转印组件或主电机驱动异常",
+     "检查转印组件安装；执行组件自检；必要时更换转印带"),
+    ("佳能", "E000/E001", "定影温度异常",
+     "定影加热器温度未达到或超过阈值",
+     "关机冷却后重试；检查热敏电阻与加热灯；进维修模式清除错误计数"),
+    ("爱普生", "0x97", "主板/打印头故障",
+     "WF 系列常见，多为打印头短路或主板损坏",
+     "断电静置后重试；检查打印头排线；多数情况需更换打印头或主板"),
+    ("爱普生", "W-11", "墨盒未识别",
+     "墨盒芯片接触不良或非原装芯片被固件屏蔽",
+     "重新安装墨盒；清洁芯片触点；确认固件版本是否屏蔽兼容芯片"),
+    ("兄弟", "Unable to Print 4F", "打印头/进纸机构故障",
+     "打印头驱动电路或进纸机构异常",
+     "断电重启；检查进纸通道异物；故障持续需检修打印头"),
+    ("理光", "SC542", "定影温度错误",
+     "定影温度未达到待机温度",
+     "进 SP 模式用 5810 复位；检查热敏电阻；必要时更换定影单元"),
+    ("理光", "SC995", "序列号不匹配",
+     "更换主板后机器序列号未同步",
+     "进 SP 模式 5811 写入正确序列号"),
+    ("通用/CUPS", "PCL XL Error", "驱动语言解析错误",
+     "驱动生成的 PCL XL 数据流含打印机无法解析的指令",
+     "换用 PCL5e 或 PS 驱动；升级打印机固件；定位触发错误的具体文档"),
+    ("通用/CUPS", "Filter failed", "CUPS 过滤器崩溃",
+     "驱动 filter 进程异常退出，任务中断在过滤阶段",
+     "查看 /var/log/cups/error_log 对应 Job 的 filter 报错；用 -o raw 绕过过滤器区分驱动问题与数据问题"),
+]
+
+
+@app.route("/error_codes")
+@login_required
+def error_codes_page():
+    brand = request.args.get("brand", "").strip()
+    q = request.args.get("q", "").strip()
+    db = get_db()
+    sql = "SELECT * FROM error_codes WHERE 1=1"
+    params = []
+    if brand:
+        sql += " AND brand=?"
+        params.append(brand)
+    if q:
+        sql += " AND (code LIKE ? OR title LIKE ? OR description LIKE ? OR solution LIKE ?)"
+        params += [f"%{q}%"] * 4
+    sql += " ORDER BY brand, code"
+    codes = db.execute(sql, params).fetchall()
+    return render_template("error_codes.html", codes=codes, brands=ERROR_BRANDS,
+                           active_brand=brand, q=q)
+
+
+@app.route("/api/error_codes", methods=["POST"])
+@login_required
+def add_error_code():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO error_codes (brand, code, title, description, solution, created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (f.get("brand", "通用/CUPS"), f["code"], f.get("title", ""),
+         f.get("description", ""), f.get("solution", ""),
+         datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("error_codes_page"))
+
+
+@app.route("/api/error_codes/<int:code_id>/delete", methods=["POST"])
+@login_required
+def del_error_code(code_id):
+    db = get_db()
+    db.execute("DELETE FROM error_codes WHERE id=?", (code_id,))
+    db.commit()
+    return redirect(url_for("error_codes_page"))
+
+
+# ---------- 打印日志分析笔记 ----------
+
+LOG_SOURCES = ["CUPS error_log", "CUPS access_log", "Windows PrintService",
+               "Windows PrintOperational", "打印机面板/EWS", "驱动调试输出"]
+
+
+@app.route("/log_analysis")
+@login_required
+def log_analysis_page():
+    source = request.args.get("source", "").strip()
+    q = request.args.get("q", "").strip()
+    db = get_db()
+    sql = "SELECT * FROM log_patterns WHERE 1=1"
+    params = []
+    if source:
+        sql += " AND source=?"
+        params.append(source)
+    if q:
+        sql += " AND (title LIKE ? OR pattern LIKE ? OR interpretation LIKE ? OR action LIKE ?)"
+        params += [f"%{q}%"] * 4
+    sql += " ORDER BY id DESC"
+    patterns = db.execute(sql, params).fetchall()
+    return render_template("log_analysis.html", patterns=patterns, sources=LOG_SOURCES,
+                           active_source=source, q=q)
+
+
+@app.route("/api/log_analysis", methods=["POST"])
+@login_required
+def add_log_pattern():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO log_patterns (title, source, pattern, interpretation, action, created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (f["title"], f.get("source", "CUPS error_log"), f.get("pattern", ""),
+         f.get("interpretation", ""), f.get("action", ""),
+         datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("log_analysis_page"))
+
+
+@app.route("/api/log_analysis/<int:pattern_id>/delete", methods=["POST"])
+@login_required
+def del_log_pattern(pattern_id):
+    db = get_db()
+    db.execute("DELETE FROM log_patterns WHERE id=?", (pattern_id,))
+    db.commit()
+    return redirect(url_for("log_analysis_page"))
+
+
+# ---------- 机型档案库 ----------
+
+DUPLEX_TYPES = ["", "自动双面", "手动双面", "仅单面"]
+
+
+@app.route("/printers")
+@login_required
+def printers_page():
+    q = request.args.get("q", "").strip()
+    db = get_db()
+    sql = "SELECT * FROM printers WHERE 1=1"
+    params = []
+    if q:
+        sql += " AND (model LIKE ? OR languages LIKE ? OR location LIKE ? OR owner LIKE ? OR notes LIKE ?)"
+        params += [f"%{q}%"] * 5
+    sql += " ORDER BY model"
+    printers = db.execute(sql, params).fetchall()
+    return render_template("printers.html", printers=printers,
+                           duplex_types=DUPLEX_TYPES, q=q)
+
+
+@app.route("/api/printers", methods=["POST"])
+@login_required
+def add_printer():
+    f = request.form
+    db = get_db()
+    db.execute(
+        "INSERT INTO printers (model, languages, duplex, trays, memory, ip, location, "
+        "owner, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (f["model"], f.get("languages", ""), f.get("duplex", ""), f.get("trays", ""),
+         f.get("memory", ""), f.get("ip", ""), f.get("location", ""), f.get("owner", ""),
+         f.get("notes", ""), datetime.now().isoformat(timespec="seconds")))
+    db.commit()
+    return redirect(url_for("printers_page"))
+
+
+@app.route("/api/printers/<int:printer_id>/delete", methods=["POST"])
+@login_required
+def del_printer(printer_id):
+    db = get_db()
+    db.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+    db.commit()
+    return redirect(url_for("printers_page"))
+
+
 # ---------- 全局搜索 ----------
 
 @app.route("/search")
@@ -1503,7 +1745,8 @@ def global_search():
             (like,)).fetchall()
         results["bugs"] = db.execute(
             "SELECT * FROM bugs WHERE title LIKE ? OR phenomenon LIKE ? OR solution LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
+            "OR model LIKE ? OR driver_version LIKE ? ORDER BY id DESC LIMIT 10",
+            (like, like, like, like, like)).fetchall()
         results["snippets"] = db.execute(
             "SELECT * FROM snippets WHERE title LIKE ? OR code LIKE ? OR tags LIKE ? "
             "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
@@ -1537,6 +1780,18 @@ def global_search():
             "SELECT * FROM test_matrix WHERE driver_version LIKE ? OR model LIKE ? "
             "OR test_item LIKE ? OR note LIKE ? ORDER BY id DESC LIMIT 10",
             (like, like, like, like)).fetchall()
+        results["error_codes"] = db.execute(
+            "SELECT * FROM error_codes WHERE brand LIKE ? OR code LIKE ? OR title LIKE ? "
+            "OR description LIKE ? OR solution LIKE ? ORDER BY id DESC LIMIT 10",
+            (like, like, like, like, like)).fetchall()
+        results["log_patterns"] = db.execute(
+            "SELECT * FROM log_patterns WHERE title LIKE ? OR pattern LIKE ? "
+            "OR interpretation LIKE ? OR action LIKE ? ORDER BY id DESC LIMIT 10",
+            (like, like, like, like)).fetchall()
+        results["printers"] = db.execute(
+            "SELECT * FROM printers WHERE model LIKE ? OR languages LIKE ? OR location LIKE ? "
+            "OR owner LIKE ? OR notes LIKE ? ORDER BY id DESC LIMIT 10",
+            (like, like, like, like, like)).fetchall()
         results = {k: v for k, v in results.items() if v}
     total = sum(len(v) for v in results.values())
     return render_template("search.html", q=q, results=results, total=total)
@@ -1693,7 +1948,7 @@ def export_data():
     """一键导出全部数据为 JSON 备份文件。"""
     db = get_db()
     tables = ["work_logs", "study_notes", "todos", "templates", "diaries",
-              "drivers", "protocols", "test_matrix",
+              "drivers", "protocols", "test_matrix", "error_codes", "log_patterns", "printers",
               "habits", "habit_logs", "bugs", "roadmap_topics", "snippets",
               "releases", "interview_questions", "compile_errors",
               "perf_records", "commands", "books"]

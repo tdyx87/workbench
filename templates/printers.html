@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}机型档案 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🖨 机型档案库</h1>
+<section class="card">
+  <h2>登记机型</h2>
+  <form method="post" action="{{ url_for('add_printer') }}" class="form">
+    <div class="form-row">
+      <label class="grow">机型 <input type="text" name="model" required placeholder="如：HP LaserJet Pro M404dn"></label>
+      <label>支持语言 <input type="text" name="languages" placeholder="PCL5/6、PS3、PDF、AirPrint…" style="width:220px"></label>
+      <label>双面
+        <select name="duplex">
+          {% for d in duplex_types %}<option value="{{ d }}">{{ d or '未记录' }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="form-row">
+      <label>纸盒 <input type="text" name="trays" placeholder="如：250页×2 + 手送" style="width:170px"></label>
+      <label>内存 <input type="text" name="memory" placeholder="如：512MB" style="width:110px"></label>
+      <label>IP 地址 <input type="text" name="ip" placeholder="如：192.168.1.50" style="width:150px"></label>
+      <label class="grow">位置 <input type="text" name="location" placeholder="如：3F 文印室"></label>
+      <label>负责人 <input type="text" name="owner" placeholder="选填" style="width:100px"></label>
+    </div>
+    <label>备注
+      <textarea name="notes" rows="2" placeholder="特殊配置、已验证的驱动版本、历史问题…"></textarea>
+    </label>
+    <button type="submit" class="btn">保存机型</button>
+  </form>
+</section>
+<section class="card">
+  <h2>机型档案（{{ printers|length }} 台）</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="搜索机型 / 语言 / 位置 / 负责人 / 备注">
+    <button type="submit" class="btn btn-sm">筛选</button>
+  </form>
+  {% if printers %}
+  <div class="entries">
+    {% for p in printers %}
+    <article class="entry">
+      <header>
+        <strong>{{ p.model }}</strong>
+        {% if p.duplex %}<span class="cat">{{ p.duplex }}</span>{% endif %}
+        {% if p.location %}<span class="cat">{{ p.location }}</span>{% endif %}
+        <form method="post" action="{{ url_for('del_printer', printer_id=p.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该机型档案？')">
+          <button class="btn-del" title="删除">×</button>
+        </form>
+      </header>
+      <p class="entry-body">
+        {% if p.languages %}<b>语言：</b>{{ p.languages }}　{% endif %}
+        {% if p.trays %}<b>纸盒：</b>{{ p.trays }}　{% endif %}
+        {% if p.memory %}<b>内存：</b>{{ p.memory }}　{% endif %}
+        {% if p.ip %}<b>IP：</b>{{ p.ip }}　{% endif %}
+        {% if p.owner %}<b>负责人：</b>{{ p.owner }}{% endif %}
+      </p>
+      {% if p.notes %}<p class="entry-body"><b>备注：</b>{{ p.notes }}</p>{% endif %}
+      <footer class="entry-foot"><span class="muted">记录于 {{ p.created_at[:16] }}</span></footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">没有匹配的机型档案。</p>{% endif %}
+</section>
+{% endblock %}
