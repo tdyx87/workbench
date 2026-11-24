@@ -7,5 +7,7 @@ Markdown>=3.4,<4.0
 # 仅 verify_app.py --http 体检脚本使用，可选
 requests>=2.28,<3.0
 
-# 生产部署用 WSGI 服务器；Windows 下不可用，自动跳过
+# 生产部署用 WSGI 服务器（自动按平台挑选，无需手工干预）
+# Linux/macOS 用 gunicorn；Windows 用 waitress
 gunicorn>=21.0; platform_system != "Windows"
+waitress>=3.0; platform_system == "Windows"

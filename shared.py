@@ -12,24 +12,31 @@ from datetime import datetime
 from flask import g, jsonify, redirect, request, session, url_for
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(BASE_DIR)
 
 
-def _env_path(name, default):
-    """路径配置：环境变量优先，否则落到项目目录内，保证换机器可直接运行。"""
-    value = os.environ.get(name)
-    if value:
-        return value
-    return os.path.join(BASE_DIR, default)
+def _auto_path(name):
+    """零配置路径探测，换机器直接能跑，不需要设任何环境变量。
+
+    查找顺序：项目目录内 -> 上一级目录 -> 项目目录内（默认，由调用方创建）。
+    上一级目录用于兼容旧布局（如数据库在 /root/workbench.db、
+    快照在 /root/db_backups），命中后自动沿用，无需手工迁移。
+    """
+    for base in (BASE_DIR, PARENT_DIR):
+        candidate = os.path.join(base, name)
+        if os.path.exists(candidate):
+            return candidate
+    return os.path.join(BASE_DIR, name)
 
 
-# 数据库文件；服务器上用 WORKBENCH_DB 指向项目外路径，本地默认落在项目内
-DB_PATH = _env_path("WORKBENCH_DB", "workbench.db")
+# 数据库文件（项目内优先，其次上级目录，否则项目内新建）
+DB_PATH = _auto_path("workbench.db")
 # JSON 备份归档目录（/api/export 产物）
-BACKUP_DIR = _env_path("WORKBENCH_BACKUP_DIR", "backups")
+BACKUP_DIR = _auto_path("backups")
 # 数据导入前的数据库快照目录
-SNAPSHOT_DIR = _env_path("WORKBENCH_SNAPSHOT_DIR", "db_backups")
+SNAPSHOT_DIR = _auto_path("db_backups")
 # 按表导入的预演临时文件目录
-IMPORT_TMP_DIR = _env_path("WORKBENCH_IMPORT_TMP", "tmp_import")
+IMPORT_TMP_DIR = _auto_path("tmp_import")
 AUTH_FILE = os.path.join(BASE_DIR, "auth.json")
 
 

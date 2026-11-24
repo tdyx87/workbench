@@ -2054,4 +2054,16 @@ if __name__ == "__main__":
         sys.exit(0)
 
     init_db()
-    app.run(host="0.0.0.0", port=8000)
+    # 零配置启动：Windows 下 gunicorn 不可用，自动切 waitress
+    # Linux/macOS 保持内置服务器；服务器上生产部署仍由 gunicorn 接管
+    if os.name == "nt":
+        try:
+            from waitress import serve
+        except ImportError:
+            print("提示：pip install waitress 可用生产级服务器，当前回退开发服务器")
+            app.run(host="0.0.0.0", port=8000)
+        else:
+            print("waitress 已启动，访问 http://127.0.0.1:8000")
+            serve(app, host="0.0.0.0", port=8000, threads=8)
+    else:
+        app.run(host="0.0.0.0", port=8000)
