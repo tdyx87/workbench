@@ -19,7 +19,8 @@ import re
 import symtable
 import sys
 
-BASE = '/root/workbench'
+BASE = os.environ.get('WORKBENCH_BASE') or os.path.dirname(
+    os.path.abspath(__file__))
 MODULES = ['app.py', 'shared.py', 'printer.py', 'admin.py', 'knowledge.py']
 
 

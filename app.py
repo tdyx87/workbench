@@ -22,7 +22,6 @@ from flask import (Flask, Response, g, jsonify, redirect, render_template,
 from markupsafe import Markup, escape
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("WORKBENCH_DB", "/root/workbench.db")
 AUTH_FILE = os.path.join(BASE_DIR, "auth.json")
 
 app = Flask(__name__)
@@ -365,7 +364,7 @@ def render_markdown(text):
         text or "", extensions=["fenced_code", "tables", "nl2br"]))
 
 
-from shared import get_db, close_db  # noqa: E402
+from shared import get_db, close_db, DB_PATH, BASE_DIR  # noqa: E402
 app.teardown_appcontext(close_db)
 
 
@@ -1900,7 +1899,8 @@ def health():
 
 # ---------- 运维看板 ----------
 
-BACKUP_DIR = "/root/workbench/backups"
+from shared import BACKUP_DIR  # noqa: E402
+
 STATUS_UNITS = [
     ("workbench.service", "主服务"),
     ("workbench-backup.timer", "每日备份"),
@@ -2033,5 +2033,25 @@ app.register_blueprint(admin_bp)
 from knowledge import bp as knowledge_bp  # noqa: E402
 app.register_blueprint(knowledge_bp)
 if __name__ == "__main__":
+    import sys
+
+    # 新环境初始化登录口令：python3 app.py --set-password [明文密码]
+    # 不传密码时自动生成随机口令并打印一次
+    if "--set-password" in sys.argv:
+        from shared import _load_auth, _save_auth
+
+        idx = sys.argv.index("--set-password")
+        pwd = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else ""
+        generated = not pwd
+        if generated:
+            pwd = secrets.token_urlsafe(12)
+        meta = _load_auth()
+        meta["password_hash"] = hashlib.sha256(
+            pwd.encode()).hexdigest()
+        _save_auth(meta)
+        print("登录口令已写入 %s" % AUTH_FILE)
+        print("密码%s：%s" % ("（随机生成）" if generated else "", pwd))
+        sys.exit(0)
+
     init_db()
     app.run(host="0.0.0.0", port=8000)

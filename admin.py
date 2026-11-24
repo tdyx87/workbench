@@ -9,8 +9,9 @@ from datetime import datetime
 from flask import (Blueprint, jsonify, redirect, render_template, request,
                    url_for)
 
-from shared import (IMPORT_TABLES, _load_auth, _save_auth, get_api_token,
-                    get_db, login_required, notify_webhook)
+from shared import (IMPORT_TABLES, IMPORT_TMP_DIR, SNAPSHOT_DIR, _load_auth,
+                    _save_auth, get_api_token, get_db, login_required,
+                    notify_webhook)
 
 bp = Blueprint("admin", __name__)
 
@@ -55,7 +56,6 @@ def import_data():
 
 # ---------- 按表导入（预演 + 执行） ----------
 
-IMPORT_TMP_DIR = "/root/workbench/tmp_import"
 IMPORT_TTL_SECONDS = 3600
 
 
@@ -186,10 +186,10 @@ def import_apply():
     db = get_db()
     snap_name = ""
     try:
-        os.makedirs("/root/db_backups", exist_ok=True)
+        os.makedirs(SNAPSHOT_DIR, exist_ok=True)
         snap_name = "pre_import_%s.db" % datetime.now().strftime(
             "%Y%m%d_%H%M%S")
-        dst = sqlite3.connect(os.path.join("/root/db_backups", snap_name))
+        dst = sqlite3.connect(os.path.join(SNAPSHOT_DIR, snap_name))
         with dst:
             db.backup(dst)
         dst.close()
