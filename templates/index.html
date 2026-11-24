@@ -9,10 +9,9 @@
            placeholder="⚡ 快捷记录：直接输入记入工作记录；支持前缀 #学习 #待办 #日记 #Bug #错误码 #协议 #测试">
     <button type="submit" class="btn">记录</button>
   </form>
-  <form method="post" action="{{ url_for('import_data') }}" enctype="multipart/form-data" class="quick-form" style="margin-top:8px">
-    <input type="file" name="file" accept=".json" required>
-    <button type="submit" class="btn btn-ghost" title="从导出的 JSON 备份恢复数据（幂等导入，不覆盖已有记录）">导入备份 JSON</button>
-  </form>
+  <div class="quick-form" style="margin-top:8px">
+    <a class="btn btn-ghost" href="{{ url_for('import_page') }}" title="按表导入：先预演差异，再选择要导入的表">按表导入（预演差异）</a>
+  </div>
 </section>
 
 <div class="stats-grid">

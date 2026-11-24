@@ -41,7 +41,7 @@
         <a href="{{ url_for('test_matrix_page') }}" class="{{ 'active' if request.endpoint == 'test_matrix_page' }}">测试矩阵</a>
         <a href="{{ url_for('error_codes_page') }}" class="{{ 'active' if request.endpoint == 'error_codes_page' }}">错误码</a>
         <a href="{{ url_for('log_analysis_page') }}" class="{{ 'active' if request.endpoint == 'log_analysis_page' }}">日志</a>
-        <a href="{{ url_for('printers_page') }}" class="{{ 'active' if request.endpoint == 'printers_page' }}">机型</a>
+        <a href="{{ url_for('printer.printers_page') }}" class="{{ 'active' if request.endpoint == 'printer.printers_page' }}">机型</a>
         <a href="{{ url_for('analytics_page') }}" class="{{ 'active' if request.endpoint == 'analytics_page' }}">统计</a>
         <a href="{{ url_for('checklist_page') }}" class="{{ 'active' if request.endpoint == 'checklist_page' }}">巡检</a>
         <a href="{{ url_for('handbook_page') }}" class="{{ 'active' if request.endpoint == 'handbook_page' }}">手册</a>

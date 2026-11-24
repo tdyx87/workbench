@@ -371,25 +371,8 @@ def render_markdown(text):
         text or "", extensions=["fenced_code", "tables", "nl2br"]))
 
 
-def get_db():
-    if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH, timeout=10)
-        g.db.row_factory = sqlite3.Row
-        # WAL 提升读写并发，busy_timeout 避免瞬时写冲突直接抛 database is locked
-        try:
-            g.db.execute("PRAGMA busy_timeout=5000")
-            g.db.execute("PRAGMA journal_mode=WAL")
-            g.db.execute("PRAGMA synchronous=NORMAL")
-        except sqlite3.DatabaseError:
-            pass
-    return g.db
-
-
-@app.teardown_appcontext
-def close_db(exception=None):
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
+from shared import get_db, close_db  # noqa: E402
+app.teardown_appcontext(close_db)
 
 
 def init_db():
@@ -488,163 +471,12 @@ def init_db():
     db.close()
 
 
-def _load_auth():
-    try:
-        with open(AUTH_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+from shared import (_load_auth, _save_auth, get_api_token,
+                    verify_api_token, notify_webhook,
+                    log_edit, archive_and_delete)  # noqa: E402
 
 
-def _save_auth(data):
-    with open(AUTH_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def get_api_token():
-    """惰性生成并返回 API Token（存入 auth.json）。"""
-    auth = _load_auth()
-    token = auth.get("api_token")
-    if not token:
-        token = secrets.token_hex(20)
-        auth["api_token"] = token
-        _save_auth(auth)
-    return token
-
-
-def verify_api_token(token):
-    stored = _load_auth().get("api_token", "")
-    return bool(token and stored and secrets.compare_digest(token, stored))
-
-
-def notify_webhook(title, text):
-    """向配置的 Webhook（Server酱/通用 JSON）发送通知。"""
-    auth = _load_auth()
-    url = auth.get("notify_webhook", "")
-    if not (auth.get("notify_enabled") and url):
-        return False
-    try:
-        if "sctapi.ftqq.com" in url or "serverchan" in url:
-            body = urllib.parse.urlencode({"title": title, "desp": text}).encode()
-        else:
-            body = json.dumps({"title": title, "text": text}).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=body, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=5).read()
-        return True
-    except (OSError, ValueError):
-        return False
-
-
-def log_edit(db, module, ref_id, action, detail=""):
-    """记录一条变更历史；失败不影响主流程。"""
-    try:
-        db.execute(
-            "INSERT INTO edit_history (module, ref_id, action, detail, created_at) "
-            "VALUES (?,?,?,?,?)",
-            (module, ref_id, action, str(detail)[:500],
-             datetime.now().isoformat(timespec="seconds")))
-    except sqlite3.DatabaseError:
-        pass
-
-
-def archive_and_delete(db, table, item_id):
-    """删除前先把整行归档到 trash（回收站），再执行物理删除。"""
-    row = db.execute(f"SELECT * FROM {table} WHERE id=?", (item_id,)).fetchone()
-    if row:
-        payload = json.dumps(dict(row), ensure_ascii=False)
-        db.execute(
-            "INSERT INTO trash (table_name, ref_id, payload, deleted_at) "
-            "VALUES (?,?,?,?)",
-            (table, item_id, payload,
-             datetime.now().isoformat(timespec="seconds")))
-        log_edit(db, table, item_id, "删除", "已归档到回收站")
-    db.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
-
-
-# ---------- 原生 SNMP（最小 SNMPv2c GET，无需第三方库） ----------
-
-def _snmp_encode_oid(oid):
-    parts = [int(x) for x in oid.strip(".").split(".")]
-    out = bytes([40 * parts[0] + parts[1]])
-    for p in parts[2:]:
-        if p < 128:
-            out += bytes([p])
-        else:
-            stack = []
-            while p:
-                stack.append(p & 0x7F)
-                p >>= 7
-            out += bytes(b | (0x80 if i < len(stack) - 1 else 0)
-                         for i, b in enumerate(reversed(stack)))
-    return out
-
-
-def _snmp_tlv(tag, value):
-    n = len(value)
-    if n < 128:
-        return bytes([tag, n]) + value
-    if n < 256:
-        return bytes([tag, 0x81, n]) + value
-    return bytes([tag, 0x82, n >> 8, n & 0xFF]) + value
-
-
-def snmp_get(ip, oid, community="public", timeout=2.0):
-    """发送 SNMPv2c GetRequest，返回 (tag, value_bytes)；失败返回 None。"""
-    pkt = _snmp_tlv(0x30,
-                    _snmp_tlv(0x02, b"\x01") +
-                    _snmp_tlv(0x04, community.encode()) +
-                    _snmp_tlv(0xA0,
-                              _snmp_tlv(0x02, b"\x01") +
-                              _snmp_tlv(0x02, b"\x00") +
-                              _snmp_tlv(0x02, b"\x00") +
-                              _snmp_tlv(0x30,
-                                        _snmp_tlv(0x30,
-                                                  _snmp_tlv(0x06, _snmp_encode_oid(oid)) +
-                                                  _snmp_tlv(0x05, b"")))))
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(timeout)
-        s.sendto(pkt, (ip, 161))
-        data, _ = s.recvfrom(4096)
-        s.close()
-    except OSError:
-        return None
-    needle = _snmp_tlv(0x06, _snmp_encode_oid(oid))
-    idx = data.find(needle)
-    if idx < 0:
-        return None
-    pos = idx + len(needle)
-    if pos + 2 > len(data):
-        return None
-    tag = data[pos]
-    ln = data[pos + 1]
-    pos += 2
-    if ln & 0x80:
-        nbytes = ln & 0x7F
-        ln = int.from_bytes(data[pos:pos + nbytes], "big")
-        pos += nbytes
-    return tag, data[pos:pos + ln]
-
-
-def verify_password(password):
-    stored = _load_auth().get("password_hash", "")
-    if not stored:
-        return False
-    return hashlib.sha256(password.encode()).hexdigest() == stored
-
-
-def login_required(view):
-    @functools.wraps(view)
-    def wrapped(*args, **kwargs):
-        if not session.get("logged_in"):
-            if verify_api_token(request.headers.get("X-API-Token", "")):
-                return view(*args, **kwargs)
-            if request.path.startswith("/api/"):
-                return jsonify({"ok": False, "error": "unauthorized"}), 401
-            return redirect(url_for("login", next=request.path))
-        return view(*args, **kwargs)
-    return wrapped
+from shared import verify_password, login_required  # noqa: E402
 
 
 @app.context_processor
@@ -2037,63 +1869,6 @@ def del_log_pattern(pattern_id):
     return redirect(url_for("log_analysis_page"))
 
 
-# ---------- 机型档案库 ----------
-
-DUPLEX_TYPES = ["", "自动双面", "手动双面", "仅单面"]
-
-
-@app.route("/printers")
-@login_required
-def printers_page():
-    q = request.args.get("q", "").strip()
-    db = get_db()
-    sql = "SELECT * FROM printers WHERE 1=1"
-    params = []
-    if q:
-        sql += " AND (model LIKE ? OR languages LIKE ? OR location LIKE ? OR owner LIKE ? OR notes LIKE ?)"
-        params += [f"%{q}%"] * 5
-    sql += " ORDER BY model"
-    rows = db.execute(sql, params).fetchall()
-    last = {}
-    for r in db.execute(
-            "SELECT printer_id, ok, checked_at FROM printer_probe_logs "
-            "WHERE id IN (SELECT MAX(id) FROM printer_probe_logs "
-            "GROUP BY printer_id)").fetchall():
-        last[r["printer_id"]] = {"ok": bool(r["ok"]),
-                                 "checked_at": r["checked_at"]}
-    printers = []
-    for r in rows:
-        item = dict(r)
-        item["last_probe"] = last.get(r["id"])
-        printers.append(item)
-    return render_template("printers.html", printers=printers,
-                           duplex_types=DUPLEX_TYPES, q=q)
-
-
-@app.route("/api/printers", methods=["POST"])
-@login_required
-def add_printer():
-    f = request.form
-    db = get_db()
-    db.execute(
-        "INSERT INTO printers (model, languages, duplex, trays, memory, ip, location, "
-        "owner, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (f["model"], f.get("languages", ""), f.get("duplex", ""), f.get("trays", ""),
-         f.get("memory", ""), f.get("ip", ""), f.get("location", ""), f.get("owner", ""),
-         f.get("notes", ""), datetime.now().isoformat(timespec="seconds")))
-    db.commit()
-    return redirect(url_for("printers_page"))
-
-
-@app.route("/api/printers/<int:printer_id>/delete", methods=["POST"])
-@login_required
-def del_printer(printer_id):
-    db = get_db()
-    archive_and_delete(db, "printers", printer_id)
-    db.commit()
-    return redirect(url_for("printers_page"))
-
-
 # ---------- 统计分析 ----------
 
 @app.route("/analytics")
@@ -2361,157 +2136,211 @@ def import_data():
     return redirect(url_for("index"))
 
 
-# ---------- SNMP 打印机在线检测 ----------
+# ---------- 按表导入（预演 + 执行） ----------
 
-PRINTER_OIDS = {
-    "设备描述": "1.3.6.1.2.1.1.1.0",
-    "总打印页数": "1.3.6.1.2.1.43.10.2.1.4.1.1",
-}
-
-# 打印机耗材相关 OID（43.11.1.1.x.1.<index>）
-SUPPLY_OIDS = {
-    "desc": "1.3.6.1.2.1.43.11.1.1.6.1.",
-    "max": "1.3.6.1.2.1.43.11.1.1.8.1.",
-    "level": "1.3.6.1.2.1.43.11.1.1.9.1.",
-}
-SUPPLY_MAX_INDEX = 4
-SUPPLY_LOW_PERCENT = 15
+IMPORT_TMP_DIR = "/root/workbench/tmp_import"
+IMPORT_TTL_SECONDS = 3600
 
 
-def _snmp_value(ip, oid):
-    """取单个 OID 的值：INTEGER 返回 int，其余返回去空白字符串；失败返回 None。"""
-    got = snmp_get(ip, oid)
-    if not got:
-        return None
-    tag, raw = got
-    if tag == 0x02 and raw:
-        return int.from_bytes(raw, "big")
-    if not raw:
-        return ""
-    return raw.decode("utf-8", "replace").strip()
-
-
-def _collect_supplies(ip):
-    """按索引遍历耗材，返回 [{'name','level','max','percent'}]。"""
-    supplies = []
-    seen = set()
-    for idx in range(1, SUPPLY_MAX_INDEX + 1):
-        name = _snmp_value(ip, SUPPLY_OIDS["desc"] + str(idx))
-        level = _snmp_value(ip, SUPPLY_OIDS["level"] + str(idx))
-        total = _snmp_value(ip, SUPPLY_OIDS["max"] + str(idx))
-        name = name.strip() if isinstance(name, str) else ""
-        # 无名称且无量值的索引视为设备不支持，直接跳过
-        if not name and not isinstance(level, int):
-            continue
-        label = name or ("耗材" + str(idx))
-        key = (label, level if isinstance(level, int) else None)
-        if key in seen:
-            continue
-        seen.add(key)
-        item = {"name": label}
-        if isinstance(level, int):
-            item["level"] = level
-        if isinstance(total, int):
-            item["max"] = total
-        if isinstance(level, int) and isinstance(total, int) and total > 0:
-            item["percent"] = max(0, min(100, round(level * 100 / total)))
-        supplies.append(item)
-    return supplies
-
-
-def _probe_once(ip):
-    """探测单台设备，成功返回 items 字典，无响应返回 None。"""
-    desc = _snmp_value(ip, PRINTER_OIDS["设备描述"])
-    if desc is None:
-        return None
-    items = {"设备描述": desc if isinstance(desc, str) else str(desc)}
-    pages = _snmp_value(ip, PRINTER_OIDS["总打印页数"])
-    if pages not in (None, ""):
-        items["总打印页数"] = str(pages)
-    supplies = _collect_supplies(ip)
-    if supplies:
-        items["耗材"] = supplies
-    return items
-
-
-def _record_probe(db, printer_id, ok, detail):
-    """记录一次探测结果，失败不影响主流程。"""
+def _ensure_import_tmp():
+    os.makedirs(IMPORT_TMP_DIR, exist_ok=True)
+    now = datetime.now().timestamp()
     try:
-        db.execute(
-            "INSERT INTO printer_probe_logs (printer_id, ok, detail, checked_at) "
-            "VALUES (?,?,?,?)",
-            (printer_id, 1 if ok else 0, str(detail)[:2000],
-             datetime.now().isoformat(timespec="seconds")))
-        db.commit()
-    except sqlite3.DatabaseError:
+        for fn in os.listdir(IMPORT_TMP_DIR):
+            fp = os.path.join(IMPORT_TMP_DIR, fn)
+            if not os.path.isfile(fp):
+                continue
+            if now - os.path.getmtime(fp) > IMPORT_TTL_SECONDS:
+                os.remove(fp)
+    except OSError:
         pass
+    return IMPORT_TMP_DIR
 
 
-@app.route("/api/printers/<int:printer_id>/probe", methods=["POST"])
-@login_required
-def probe_printer(printer_id):
-    db = get_db()
-    p = db.execute("SELECT * FROM printers WHERE id=?", (printer_id,)).fetchone()
-    if not p:
-        return jsonify({"ok": False, "error": "机型不存在"})
-    if not p["ip"]:
-        _record_probe(db, printer_id, False, "未配置 IP")
-        return jsonify({"ok": False, "error": "该机型未配置 IP 地址"})
-    items = _probe_once(p["ip"])
-    if items is None:
-        _record_probe(db, printer_id, False, "SNMP 无响应")
-        return jsonify({"ok": False,
-                        "error": "SNMP 无响应（设备离线、未开启 SNMP 或网络不可达）"})
-    low = [s for s in items.get("耗材", [])
-           if s.get("percent") is not None
-           and s["percent"] <= SUPPLY_LOW_PERCENT]
-    if low:
-        names = "、".join(
-            "%s(%d%%)" % (s["name"], s["percent"]) for s in low)
-        items["低耗材告警"] = names
-        notify_webhook("打印机耗材不足",
-                       "%s（%s）：%s" % (p["model"], p["ip"], names))
-    _record_probe(db, printer_id, True, str(items)[:1000])
-    return jsonify({"ok": True, "ip": p["ip"], "items": items})
-
-
-@app.route("/api/printers/probe_all", methods=["POST"])
-@login_required
-def probe_all_printers():
-    db = get_db()
-    rows = db.execute(
-        "SELECT id, model, ip FROM printers WHERE ip != '' ORDER BY id"
-    ).fetchall()
-    results = []
-    online = 0
-    for r in rows:
-        items = _probe_once(r["ip"])
-        if items is None:
-            _record_probe(db, r["id"], False, "SNMP 无响应")
-            results.append({"id": r["id"], "model": r["model"],
-                            "ip": r["ip"], "ok": False,
-                            "error": "SNMP 无响应"})
+def _analyze_import(db, data):
+    """逐表统计：将新增 / 将覆盖 / 无变化 / 跳过。"""
+    report = []
+    for table in IMPORT_TABLES:
+        rows = data.get(table)
+        if not isinstance(rows, list):
             continue
-        online += 1
-        low = [s for s in items.get("耗材", [])
-               if s.get("percent") is not None
-               and s["percent"] <= SUPPLY_LOW_PERCENT]
-        if low:
-            items["低耗材告警"] = "、".join(
-                "%s(%d%%)" % (s["name"], s["percent"]) for s in low)
-        _record_probe(db, r["id"], True, str(items)[:1000])
-        results.append({"id": r["id"], "model": r["model"],
-                        "ip": r["ip"], "ok": True, "items": items})
-    low_all = [x for x in results
-               if x.get("ok") and x.get("items", {}).get("低耗材告警")]
-    if low_all:
-        notify_webhook(
-            "打印机批量巡检：%d 台耗材不足" % len(low_all),
-            "\n".join("%s（%s）：%s" % (x["model"], x["ip"],
-                                       x["items"]["低耗材告警"])
-                      for x in low_all))
-    return jsonify({"ok": True, "total": len(rows), "online": online,
-                    "results": results})
+        try:
+            cols = [r[1] for r in db.execute(
+                f"PRAGMA table_info({table})").fetchall()]
+            existing = {}
+            for r in db.execute(f"SELECT * FROM {table}").fetchall():
+                existing[r["id"]] = dict(r)
+        except sqlite3.DatabaseError:
+            continue
+        if not cols:
+            continue
+        add = upd = same = skip = 0
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("id"):
+                skip += 1
+                continue
+            usable = [c for c in cols if c in row]
+            if not usable:
+                skip += 1
+                continue
+            cur = existing.get(row["id"])
+            if cur is None:
+                add += 1
+                continue
+            changed = False
+            for c in usable:
+                old = cur.get(c)
+                new = row[c]
+                if str(old if old is not None else "") != str(
+                        new if new is not None else ""):
+                    changed = True
+                    break
+            if changed:
+                upd += 1
+            else:
+                same += 1
+        report.append({"table": table, "rows": len(rows), "add": add,
+                       "update": upd, "same": same, "skip": skip})
+    return report
+
+
+@app.route("/import")
+@login_required
+def import_page():
+    return render_template("import.html", report=None, token="",
+                           exported_at="", totals=None,
+                           msg=request.args.get("msg", ""))
+
+
+@app.route("/api/import/preview", methods=["POST"])
+@login_required
+def import_preview():
+    f = request.files.get("file")
+    if not f:
+        return redirect(url_for("import_page", msg="请选择要导入的 JSON 文件"))
+    try:
+        payload = json.loads(f.read().decode("utf-8"))
+        data = payload.get("data", {})
+        if not isinstance(data, dict) or not data:
+            raise ValueError("empty")
+    except (ValueError, UnicodeDecodeError):
+        return redirect(url_for(
+            "import_page", msg="文件解析失败：请上传由导出功能生成的 JSON"))
+    db = get_db()
+    report = _analyze_import(db, data)
+    if not report:
+        return redirect(url_for(
+            "import_page", msg="JSON 中没有可识别的数据表"))
+    d = _ensure_import_tmp()
+    token = secrets.token_hex(8)
+    try:
+        with open(os.path.join(d, token + ".json"), "w",
+                  encoding="utf-8") as fp:
+            json.dump({"data": data}, fp, ensure_ascii=False)
+    except OSError:
+        return redirect(url_for("import_page", msg="临时文件写入失败"))
+    totals = {"add": sum(r["add"] for r in report),
+              "update": sum(r["update"] for r in report),
+              "same": sum(r["same"] for r in report),
+              "skip": sum(r["skip"] for r in report)}
+    return render_template(
+        "import.html", report=report, token=token,
+        exported_at=payload.get("exported_at", ""), msg="", totals=totals)
+
+
+@app.route("/api/import/apply", methods=["POST"])
+@login_required
+def import_apply():
+    token = (request.form.get("token") or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{16}", token):
+        return redirect(url_for("import_page", msg="导入令牌无效，请重新上传"))
+    chosen = set(request.form.getlist("tables"))
+    path = os.path.join(IMPORT_TMP_DIR, token + ".json")
+    if not os.path.isfile(path):
+        return redirect(url_for(
+            "import_page", msg="预演数据已过期（超过 1 小时），请重新上传"))
+    try:
+        with open(path, encoding="utf-8") as fp:
+            data = json.load(fp).get("data", {})
+    except (ValueError, OSError):
+        return redirect(url_for("import_page", msg="预演数据读取失败"))
+    if not data:
+        return redirect(url_for("import_page", msg="预演数据为空"))
+    db = get_db()
+    snap_name = ""
+    try:
+        os.makedirs("/root/db_backups", exist_ok=True)
+        snap_name = "pre_import_%s.db" % datetime.now().strftime(
+            "%Y%m%d_%H%M%S")
+        dst = sqlite3.connect(os.path.join("/root/db_backups", snap_name))
+        with dst:
+            db.backup(dst)
+        dst.close()
+    except (sqlite3.DatabaseError, OSError):
+        snap_name = ""
+    added = updated = 0
+    touched = []
+    for table in IMPORT_TABLES:
+        if chosen and table not in chosen:
+            continue
+        rows = data.get(table, [])
+        if not isinstance(rows, list):
+            continue
+        try:
+            cols = [r[1] for r in db.execute(
+                f"PRAGMA table_info({table})").fetchall()]
+        except sqlite3.DatabaseError:
+            continue
+        if not cols:
+            continue
+        cnt_a = cnt_u = cnt_s = 0
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("id"):
+                continue
+            usable = [c for c in cols if c in row]
+            if not usable:
+                continue
+            cur = db.execute(
+                f"SELECT * FROM {table} WHERE id=?", (row["id"],)).fetchone()
+            changed = cur is None
+            if cur is not None:
+                for c in usable:
+                    old = cur[c]
+                    new = row[c]
+                    if str(old if old is not None else "") != str(
+                            new if new is not None else ""):
+                        changed = True
+                        break
+            if not changed:
+                # 内容完全一致，跳过写入，避免无意义的覆盖
+                cnt_s += 1
+                continue
+            vals = [str(row[c]) if row[c] is not None else ""
+                    for c in usable]
+            db.execute(
+                f"INSERT OR REPLACE INTO {table} ({','.join(usable)}) "
+                f"VALUES ({','.join('?' * len(usable))})", vals)
+            if cur is None:
+                cnt_a += 1
+            else:
+                cnt_u += 1
+        if cnt_a or cnt_u:
+            touched.append("%s(+%d/~%d)" % (table, cnt_a, cnt_u))
+        added += cnt_a
+        updated += cnt_u
+    db.commit()
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    msg = "导入完成：新增 %d 条，覆盖 %d 条" % (added, updated)
+    if touched:
+        msg += "（%s）" % "、".join(touched[:6])
+    if snap_name:
+        msg += "；执行前已生成库快照 %s" % snap_name
+    else:
+        msg += "；警告：库快照生成失败，请人工确认"
+    return redirect(url_for("import_page", msg=msg))
 
 
 # ---------- 变更历史 ----------
@@ -2702,7 +2531,7 @@ SEARCH_TARGETS = [
       ('brand', 3)], 'brand'),
     ('log_patterns', '日志模式', '🧾', 'log_analysis_page',
      [('title', 10), ('pattern', 7), ('interpretation', 5), ('action', 4)], ''),
-    ('printers', '机型档案', '🖨', 'printers_page',
+    ('printers', '机型档案', '🖨', 'printer.printers_page',
      [('model', 10), ('location', 5), ('owner', 4), ('notes', 4),
       ('languages', 3), ('ip', 3)], 'location'),
 ]
@@ -3168,6 +2997,10 @@ def status_page():
                            backups=backups, total_backups=total_backups,
                            units=units, probes=probes, summary=summary,
                            checked_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+from printer import bp as printer_bp  # noqa: E402
+app.register_blueprint(printer_bp)
 
 
 if __name__ == "__main__":

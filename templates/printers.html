@@ -4,7 +4,7 @@
 <h1 class="page-title">🖨 机型档案库</h1>
 <section class="card">
   <h2>登记机型</h2>
-  <form method="post" action="{{ url_for('add_printer') }}" class="form">
+  <form method="post" action="{{ url_for('printer.add_printer') }}" class="form">
     <div class="form-row">
       <label class="grow">机型 <input type="text" name="model" required placeholder="如：HP LaserJet Pro M404dn"></label>
       <label>支持语言 <input type="text" name="languages" placeholder="PCL5/6、PS3、PDF、AirPrint…" style="width:220px"></label>
@@ -47,7 +47,7 @@
         <strong>{{ p.model }}</strong>
         {% if p.duplex %}<span class="cat">{{ p.duplex }}</span>{% endif %}
         {% if p.location %}<span class="cat">{{ p.location }}</span>{% endif %}
-        <form method="post" action="{{ url_for('del_printer', printer_id=p.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该机型档案？')">
+        <form method="post" action="{{ url_for('printer.del_printer', printer_id=p.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该机型档案？')">
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>
