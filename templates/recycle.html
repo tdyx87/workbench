@@ -16,10 +16,10 @@
       </header>
       <p class="entry-body muted">删除时间：{{ it.deleted_at }}</p>
       <footer class="entry-foot">
-        <form method="post" action="{{ url_for('restore_trash', trash_id=it.id) }}" class="inline" style="margin-left:0">
+        <form method="post" action="{{ url_for('admin.restore_trash', trash_id=it.id) }}" class="inline" style="margin-left:0">
           <button class="btn btn-sm" type="submit">恢复</button>
         </form>
-        <form method="post" action="{{ url_for('purge_trash', trash_id=it.id) }}" class="inline" onsubmit="return confirm('彻底删除后无法恢复，确定继续？')">
+        <form method="post" action="{{ url_for('admin.purge_trash', trash_id=it.id) }}" class="inline" onsubmit="return confirm('彻底删除后无法恢复，确定继续？')">
           <button class="btn-del" type="submit" title="彻底删除">×</button>
         </form>
       </footer>

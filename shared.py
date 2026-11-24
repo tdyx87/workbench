@@ -128,3 +128,43 @@ def login_required(view):
             return redirect(url_for("login", next=request.path))
         return view(*args, **kwargs)
     return wrapped
+
+
+IMPORT_TABLES = {
+    "work_logs": ["log_date", "title", "content", "project", "tags", "created_at"],
+    "study_notes": ["topic", "category", "content", "mastery", "next_review",
+                    "review_stage", "last_reviewed", "created_at"],
+    "todos": ["title", "priority", "due_date", "done", "project", "created_at"],
+    "diaries": ["diary_date", "mood", "content", "created_at"],
+    "bugs": ["title", "platform", "severity", "phenomenon", "root_cause",
+             "solution", "status", "driver_version", "model", "created_at"],
+    "snippets": ["title", "language", "code", "tags", "created_at"],
+    "commands": ["category", "name", "command", "description", "created_at"],
+    "compile_errors": ["compiler", "error_msg", "cause", "solution", "created_at"],
+    "interview_questions": ["question", "answer", "category", "mastery",
+                            "next_review", "review_stage", "created_at"],
+    "perf_records": ["title", "target", "detail", "created_at"],
+    "books": ["title", "author", "note", "progress", "created_at"],
+    "crashes": ["title", "module", "signal", "stack", "root_cause", "fix",
+                "status", "created_at"],
+    "releases": ["version", "release_date", "platform", "changes", "issues",
+                 "created_at"],
+    "drivers": ["model", "driver_version", "firmware_version", "release_date",
+                "changes", "known_issues", "recommend", "created_at"],
+    "protocols": ["title", "protocol", "summary", "commands", "notes", "created_at"],
+    "test_matrix": ["driver_version", "model", "test_item", "result", "tester",
+                    "note", "created_at"],
+    "error_codes": ["brand", "code", "title", "description", "solution", "created_at"],
+    "log_patterns": ["title", "source", "pattern", "interpretation", "action",
+                     "created_at"],
+    "printers": ["model", "languages", "duplex", "trays", "memory", "ip",
+                 "location", "owner", "notes", "created_at"],
+    "printer_probe_logs": ["printer_id", "ok", "detail", "checked_at"],
+    "roadmap_topics": ["topic", "category", "status", "progress", "note", "created_at"],
+    "habits": ["name", "target_days", "created_at"],
+    "habit_logs": ["habit_id", "log_date", "created_at"],
+    "templates": ["name", "content", "created_at"],
+    "checklists": ["title", "model", "cycle_days", "last_done", "note", "created_at"],
+    "edit_history": ["module", "ref_id", "action", "detail", "created_at"],
+    "trash": ["table_name", "ref_id", "payload", "deleted_at"],
+}

@@ -12,7 +12,7 @@
       <input type="text" value="{{ token }}" readonly onclick="this.select()" style="width:100%;font-family:monospace">
     </label>
   </form>
-  <form method="post" action="{{ url_for('regenerate_token') }}" onsubmit="return confirm('重新生成后旧 Token 立即失效，确定继续？')">
+  <form method="post" action="{{ url_for('admin.regenerate_token') }}" onsubmit="return confirm('重新生成后旧 Token 立即失效，确定继续？')">
     <button type="submit" class="btn btn-sm">重新生成 Token</button>
   </form>
   <p class="muted" style="margin-top:12px">示例：<code>curl -H &quot;X-API-Token: {{ token }}&quot; http://127.0.0.1:8000/api/export</code></p>
@@ -21,7 +21,7 @@
 <section class="card">
   <h2>到期通知</h2>
   <p class="muted">巡检项到期时推送提醒，每天最多推送一次。支持 Server酱（https://sctapi.ftqq.com/&lt;SendKey&gt;.send）或任意接受 JSON 的 Webhook。</p>
-  <form method="post" action="{{ url_for('save_notify') }}" class="form">
+  <form method="post" action="{{ url_for('admin.save_notify') }}" class="form">
     <label>Webhook 地址
       <input type="text" name="webhook" value="{{ webhook }}" placeholder="如：https://sctapi.ftqq.com/SCTxxxxx.send" style="width:100%">
     </label>
@@ -30,7 +30,7 @@
     </label>
     <button type="submit" class="btn">保存配置</button>
   </form>
-  <form method="post" action="{{ url_for('test_notify') }}" style="margin-top:10px">
+  <form method="post" action="{{ url_for('admin.test_notify') }}" style="margin-top:10px">
     <button type="submit" class="btn btn-ghost btn-sm">发送测试通知</button>
   </form>
 </section>
