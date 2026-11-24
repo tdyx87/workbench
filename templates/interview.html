@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>新增面试题</h2>
-  <form method="post" action="{{ url_for('add_interview') }}" class="form">
+  <form method="post" action="{{ url_for('knowledge.add_interview') }}" class="form">
     <div class="form-row">
       <label class="grow">题目 <input type="text" name="question" required placeholder="如：Handler 消息机制原理？"></label>
       <label>分类 <input type="text" name="category" placeholder="如：Android / 算法 / 系统设计" list="iq-cat-list" style="width:150px">
@@ -25,9 +25,9 @@
 <section class="card">
   <h2>题库（{{ questions|length }} 题）<span class="muted">带 ⏰ 的表示今日应复习</span></h2>
   <div class="filter-bar">
-    <a class="chip {{ 'on' if not active_cat }}" href="{{ url_for('interview_page') }}">全部</a>
+    <a class="chip {{ 'on' if not active_cat }}" href="{{ url_for('knowledge.interview_page') }}">全部</a>
     {% for c in categories %}
-    <a class="chip {{ 'on' if active_cat == c }}" href="{{ url_for('interview_page', category=c) }}">{{ c }}</a>
+    <a class="chip {{ 'on' if active_cat == c }}" href="{{ url_for('knowledge.interview_page', category=c) }}">{{ c }}</a>
     {% endfor %}
   </div>
   {% if questions %}
@@ -38,7 +38,7 @@
         <span class="cat">{{ q.category }}</span>
         <strong>{{ q.question }}</strong>
         {% if q.next_review and q.next_review <= today %}<span class="due-badge">⏰ 待复习</span>{% endif %}
-        <form method="post" action="{{ url_for('del_interview', qid=q.id) }}" class="inline" onsubmit="return confirm('删除这道面试题？')">
+        <form method="post" action="{{ url_for('knowledge.del_interview', qid=q.id) }}" class="inline" onsubmit="return confirm('删除这道面试题？')">
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>
@@ -46,7 +46,7 @@
       <footer class="entry-foot">
         <span class="progress"><i style="width:{{ q.mastery }}%"></i></span>
         <span class="muted">掌握 {{ q.mastery }}%</span>
-        <form method="post" action="{{ url_for('review_interview', qid=q.id) }}" class="inline">
+        <form method="post" action="{{ url_for('knowledge.review_interview', qid=q.id) }}" class="inline">
           <button class="btn btn-sm btn-ghost" type="submit">已复习 ✓</button>
         </form>
         <span class="muted">第 {{ q.review_stage }} 轮{% if q.next_review %} · 下次复习 {{ q.next_review }}{% endif %}</span>

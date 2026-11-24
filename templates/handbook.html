@@ -50,7 +50,7 @@
 </section>
 
 <section class="card">
-  <h2>💥 已修复崩溃档案（{{ sections.crashes|length }} 条）<a class="more" href="{{ url_for('crashes_page') }}">管理 →</a></h2>
+  <h2>💥 已修复崩溃档案（{{ sections.crashes|length }} 条）<a class="more" href="{{ url_for('knowledge.crashes_page') }}">管理 →</a></h2>
   {% if sections.crashes %}
   <div class="entries">
     {% for c in sections.crashes %}

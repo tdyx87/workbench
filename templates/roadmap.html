@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>新增技术主题</h2>
-  <form method="post" action="{{ url_for('add_topic') }}" class="form">
+  <form method="post" action="{{ url_for('knowledge.add_topic') }}" class="form">
     <div class="form-row">
       <label class="grow">主题名称 <input type="text" name="name" required placeholder="如：Kotlin 协程 / SwiftUI 动画 / 启动优化"></label>
       <label>分类 <input type="text" name="category" placeholder="如：Android / iOS / 跨端 / 性能" list="rm-cat-list" style="width:150px">
@@ -30,13 +30,13 @@
         <header>
           <span class="status-chip st-{{ t.status }}">{{ t.status }}</span>
           <strong>{{ t.name }}</strong>
-          <form method="post" action="{{ url_for('del_topic', topic_id=t.id) }}" class="inline" onsubmit="return confirm('删除该技术主题？')">
+          <form method="post" action="{{ url_for('knowledge.del_topic', topic_id=t.id) }}" class="inline" onsubmit="return confirm('删除该技术主题？')">
             <button class="btn-del" title="删除">×</button>
           </form>
         </header>
         {% if t.note %}<p class="entry-body">{{ t.note }}</p>{% endif %}
         <footer class="entry-foot">
-          <form method="post" action="{{ url_for('update_topic_progress', topic_id=t.id) }}" class="inline mastery-form">
+          <form method="post" action="{{ url_for('knowledge.update_topic_progress', topic_id=t.id) }}" class="inline mastery-form">
             <span class="progress"><i style="width:{{ t.progress }}%"></i></span>
             <input type="number" name="progress" min="0" max="100" value="{{ t.progress }}">
             <button class="btn btn-sm" type="submit">更新进度</button>

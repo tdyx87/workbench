@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>添加书目</h2>
-  <form method="post" action="{{ url_for('add_book') }}" class="form">
+  <form method="post" action="{{ url_for('knowledge.add_book') }}" class="form">
     <div class="form-row">
       <label class="grow">书名 <input type="text" name="title" required placeholder="如：Effective C++"></label>
       <label>作者 <input type="text" name="author" placeholder="Scott Meyers" style="width:160px"></label>
@@ -36,14 +36,14 @@
         <strong>{{ b.title }}</strong>
         {% if b.author %}<span class="muted">{{ b.author }}</span>{% endif %}
         <span class="cat">{{ b.category }}</span>
-        <form method="post" action="{{ url_for('del_book', book_id=b.id) }}" class="inline" onsubmit="return confirm('删除这本书？')">
+        <form method="post" action="{{ url_for('knowledge.del_book', book_id=b.id) }}" class="inline" onsubmit="return confirm('删除这本书？')">
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>
       {% if b.note %}<p class="entry-body">{{ b.note }}</p>{% endif %}
       <footer class="entry-foot">
         {% if b.total_pages %}
-        <form method="post" action="{{ url_for('update_book_progress', book_id=b.id) }}" class="inline mastery-form">
+        <form method="post" action="{{ url_for('knowledge.update_book_progress', book_id=b.id) }}" class="inline mastery-form">
           <span class="progress"><i style="width:{{ b.percent }}%"></i></span>
           <input type="number" name="read_pages" min="0" max="{{ b.total_pages }}" value="{{ b.read_pages }}">
           <span class="muted">/ {{ b.total_pages }} 页（{{ b.percent }}%）</span>

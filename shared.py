@@ -168,3 +168,11 @@ IMPORT_TABLES = {
     "edit_history": ["module", "ref_id", "action", "detail", "created_at"],
     "trash": ["table_name", "ref_id", "payload", "deleted_at"],
 }
+
+
+PLATFORMS = ["通用", "Linux 服务端", "嵌入式", "Qt", "Windows", "macOS",
+             "Android", "iOS", "Web", "Flutter", "HarmonyOS"]
+
+COMPILERS = ["GCC", "Clang", "MSVC", "CMake", "通用"]
+
+REVIEW_INTERVALS = [1, 3, 7, 15, 30]

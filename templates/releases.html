@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>记录发版</h2>
-  <form method="post" action="{{ url_for('add_release') }}" class="form">
+  <form method="post" action="{{ url_for('knowledge.add_release') }}" class="form">
     <div class="form-row">
       <label>版本号 <input type="text" name="version" required placeholder="如：v3.2.1" style="width:140px"></label>
       <label>发布日期 <input type="date" name="release_date" value="{{ today }}"></label>
@@ -49,7 +49,7 @@
           <span class="version-badge">{{ r.version }}</span>
           {% if r.platform %}<span class="cat">{{ r.platform }}</span>{% endif %}
           <span class="muted">{{ r.release_date }}</span>
-          <form method="post" action="{{ url_for('del_release', release_id=r.id) }}" class="inline" onsubmit="return confirm('删除该发版记录？')">
+          <form method="post" action="{{ url_for('knowledge.del_release', release_id=r.id) }}" class="inline" onsubmit="return confirm('删除该发版记录？')">
             <button class="btn-del" title="删除">×</button>
           </form>
         </header>

@@ -44,7 +44,7 @@
       <span class="cat">{{ q.category }}</span>
       <span class="title">💼 {{ q.question }}</span>
       <span class="muted">应复习日期 {{ q.next_review }}</span>
-      <form method="post" action="{{ url_for('review_interview', qid=q.id) }}" class="inline">
+      <form method="post" action="{{ url_for('knowledge.review_interview', qid=q.id) }}" class="inline">
         <button class="btn btn-sm" type="submit">已复习 ✓</button>
       </form>
     </li>

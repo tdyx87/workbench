@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>新增命令</h2>
-  <form method="post" action="{{ url_for('add_command') }}" class="form">
+  <form method="post" action="{{ url_for('knowledge.add_command') }}" class="form">
     <div class="form-row">
       <label>分类 <input type="text" name="category" placeholder="如：GDB / perf / CMake" list="cmd-cat-list" style="width:150px">
         <datalist id="cmd-cat-list">
@@ -40,7 +40,7 @@
         <span class="cat">{{ c.category }}</span>
         <strong>{{ c.name }}</strong>
         <button class="btn btn-sm btn-ghost" type="button" onclick="copyCmd({{ c.id }})">复制</button>
-        <form method="post" action="{{ url_for('del_command', cmd_id=c.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该命令？')">
+        <form method="post" action="{{ url_for('knowledge.del_command', cmd_id=c.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该命令？')">
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>

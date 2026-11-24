@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>记录崩溃案例</h2>
-  <form method="post" action="{{ url_for('add_crash') }}" class="form">
+  <form method="post" action="{{ url_for('knowledge.add_crash') }}" class="form">
     <div class="form-row">
       <label class="grow">标题 <input type="text" name="title" required placeholder="如：空指针导致服务崩溃"></label>
       <label>模块 <input type="text" name="module" placeholder="如：网络库 / UI 层" style="width:150px"></label>
@@ -54,12 +54,12 @@
         {% if c.module %}<span class="cat">{{ c.module }}</span>{% endif %}
         <strong class="{{ 'solved' if c.status == '已修复' }}">{{ c.title }}</strong>
         <span class="bug-status {{ 'resolved' if c.status == '已修复' }}">{{ c.status }}</span>
-        <form method="post" action="{{ url_for('resolve_crash', crash_id=c.id) }}" class="inline">
+        <form method="post" action="{{ url_for('knowledge.resolve_crash', crash_id=c.id) }}" class="inline">
           <button class="btn btn-sm {{ 'btn-ghost' if c.status == '已修复' }}" type="submit">
             {{ '重新打开' if c.status == '已修复' else '标记修复 ✓' }}
           </button>
         </form>
-        <form method="post" action="{{ url_for('del_crash', crash_id=c.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该崩溃档案？')">
+        <form method="post" action="{{ url_for('knowledge.del_crash', crash_id=c.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该崩溃档案？')">
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>

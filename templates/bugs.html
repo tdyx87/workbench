@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>记录 Bug</h2>
-  <form method="post" action="{{ url_for('add_bug') }}" class="form">
+  <form method="post" action="{{ url_for('knowledge.add_bug') }}" class="form">
     <div class="form-row">
       <label class="grow">标题 <input type="text" name="title" required placeholder="Bug 简述"></label>
       <label>平台
@@ -77,12 +77,12 @@
         {% if b.driver_version %}<span class="cat">{{ b.driver_version }}</span>{% endif %}
         <strong class="{{ 'solved' if b.status == '已解决' }}">{{ b.title }}</strong>
         <span class="bug-status {{ 'resolved' if b.status == '已解决' }}">{{ b.status }}</span>
-        <form method="post" action="{{ url_for('resolve_bug', bug_id=b.id) }}" class="inline">
+        <form method="post" action="{{ url_for('knowledge.resolve_bug', bug_id=b.id) }}" class="inline">
           <button class="btn btn-sm {{ 'btn-ghost' if b.status == '已解决' }}" type="submit">
             {{ '重新打开' if b.status == '已解决' else '标记解决 ✓' }}
           </button>
         </form>
-        <form method="post" action="{{ url_for('del_bug', bug_id=b.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('确定删除这条 Bug 记录？')">
+        <form method="post" action="{{ url_for('knowledge.del_bug', bug_id=b.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('确定删除这条 Bug 记录？')">
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>

@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>记录报错</h2>
-  <form method="post" action="{{ url_for('add_compile_error') }}" class="form">
+  <form method="post" action="{{ url_for('knowledge.add_compile_error') }}" class="form">
     <div class="form-row">
       <label>编译器
         <select name="compiler">
@@ -45,7 +45,7 @@
         <span class="cat">{{ e.compiler }}</span>
         <strong class="err-msg">{{ e.error_msg }}</strong>
         {% if e.tags %}{% for t in e.tags.split(',') %}<span class="tag">{{ t.strip() }}</span>{% endfor %}{% endif %}
-        <form method="post" action="{{ url_for('del_compile_error', err_id=e.id) }}" class="inline" onsubmit="return confirm('删除这条记录？')">
+        <form method="post" action="{{ url_for('knowledge.del_compile_error', err_id=e.id) }}" class="inline" onsubmit="return confirm('删除这条记录？')">
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>

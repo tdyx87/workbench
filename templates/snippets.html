@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>新增片段</h2>
-  <form method="post" action="{{ url_for('add_snippet') }}" class="form">
+  <form method="post" action="{{ url_for('knowledge.add_snippet') }}" class="form">
     <div class="form-row">
       <label class="grow">标题 <input type="text" name="title" required placeholder="如：Android 启动耗时统计工具"></label>
       <label>语言 <input type="text" name="language" placeholder="如：kotlin / swift / python" list="lang-list" style="width:150px">
@@ -43,7 +43,7 @@
         <strong>{{ s.title }}</strong>
         {% if s.tags %}{% for t in s.tags.split(',') %}<span class="tag">{{ t.strip() }}</span>{% endfor %}{% endif %}
         <button class="btn btn-sm btn-ghost" type="button" onclick="copySnippet({{ s.id }})">复制</button>
-        <form method="post" action="{{ url_for('del_snippet', snippet_id=s.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该代码片段？')">
+        <form method="post" action="{{ url_for('knowledge.del_snippet', snippet_id=s.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该代码片段？')">
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>
