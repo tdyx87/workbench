@@ -51,6 +51,8 @@
         <a href="{{ url_for('weekly_review') }}" class="{{ 'active' if request.endpoint == 'weekly_review' }}">回顾</a>
         <a href="{{ url_for('weekly_report') }}" class="{{ 'active' if request.endpoint == 'weekly_report' }}">周报</a>
         <a href="{{ url_for('global_search') }}" class="{{ 'active' if request.endpoint == 'global_search' }}">搜索</a>
+        <a href="{{ url_for('status_page') }}" class="{{ 'active' if request.endpoint == 'status_page' }}">运维看板</a>
+        <a href="{{ url_for('history_page') }}" class="{{ 'active' if request.endpoint == 'history_page' }}">变更历史</a>
         <a href="{{ url_for('recycle_page') }}" class="{{ 'active' if request.endpoint == 'recycle_page' }}">回收站</a>
         <a href="{{ url_for('settings_page') }}" class="{{ 'active' if request.endpoint == 'settings_page' }}">设置</a>
         <a href="{{ url_for('export_data') }}" title="导出全部数据为 JSON">导出</a>

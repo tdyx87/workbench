@@ -11,6 +11,7 @@ import re
 import secrets
 import socket
 import sqlite3
+import subprocess
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -535,15 +536,29 @@ def notify_webhook(title, text):
         return False
 
 
+def log_edit(db, module, ref_id, action, detail=""):
+    """记录一条变更历史；失败不影响主流程。"""
+    try:
+        db.execute(
+            "INSERT INTO edit_history (module, ref_id, action, detail, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (module, ref_id, action, str(detail)[:500],
+             datetime.now().isoformat(timespec="seconds")))
+    except sqlite3.DatabaseError:
+        pass
+
+
 def archive_and_delete(db, table, item_id):
     """删除前先把整行归档到 trash（回收站），再执行物理删除。"""
     row = db.execute(f"SELECT * FROM {table} WHERE id=?", (item_id,)).fetchone()
     if row:
+        payload = json.dumps(dict(row), ensure_ascii=False)
         db.execute(
             "INSERT INTO trash (table_name, ref_id, payload, deleted_at) "
             "VALUES (?,?,?,?)",
-            (table, item_id, json.dumps(dict(row), ensure_ascii=False),
+            (table, item_id, payload,
              datetime.now().isoformat(timespec="seconds")))
+        log_edit(db, table, item_id, "删除", "已归档到回收站")
     db.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
 
 
@@ -830,7 +845,12 @@ def add_study():
 def update_mastery(note_id):
     db = get_db()
     mastery = max(0, min(100, int(request.form.get("mastery", 0))))
+    old = db.execute("SELECT mastery FROM study_notes WHERE id=?",
+                     (note_id,)).fetchone()
     db.execute("UPDATE study_notes SET mastery=? WHERE id=?", (mastery, note_id))
+    if old:
+        log_edit(db, "study_notes", note_id, "掌握度变更",
+                 f"{old['mastery']} → {mastery}")
     db.commit()
     return redirect(url_for("study_page"))
 
@@ -848,6 +868,8 @@ def mark_reviewed(note_id):
             "UPDATE study_notes SET review_stage=?, next_review=?, last_reviewed=?, "
             "mastery=? WHERE id=?",
             (stage, nxt, date.today().isoformat(), mastery, note_id))
+        log_edit(db, "study_notes", note_id, "复习打卡",
+                 f"阶段 {stage}，下次 {nxt}")
         db.commit()
     return redirect(request.referrer or url_for("study_page"))
 
@@ -894,7 +916,12 @@ def add_todo():
 @login_required
 def toggle_todo(todo_id):
     db = get_db()
+    old = db.execute("SELECT done FROM todos WHERE id=?",
+                     (todo_id,)).fetchone()
     db.execute("UPDATE todos SET done = 1 - done WHERE id=?", (todo_id,))
+    if old:
+        arrow = "未完成 → 已完成" if not old["done"] else "已完成 → 未完成"
+        log_edit(db, "todos", todo_id, "完成状态切换", arrow)
     db.commit()
     return redirect(url_for("todo_page"))
 
@@ -1131,8 +1158,13 @@ def update_topic_progress(topic_id):
     db = get_db()
     progress = max(0, min(100, int(request.form.get("progress", 0))))
     status = "已掌握" if progress >= 100 else ("进行中" if progress > 0 else "未开始")
+    old = db.execute("SELECT progress FROM roadmap_topics WHERE id=?",
+                     (topic_id,)).fetchone()
     db.execute("UPDATE roadmap_topics SET progress=?, status=? WHERE id=?",
                (progress, status, topic_id))
+    if old:
+        log_edit(db, "roadmap_topics", topic_id, "进度变更",
+                 f"{old['progress']}% → {progress}%")
     db.commit()
     return redirect(url_for("roadmap_page"))
 
@@ -1283,6 +1315,8 @@ def review_interview(qid):
             "UPDATE interview_questions SET review_stage=?, next_review=?, "
             "last_reviewed=?, mastery=? WHERE id=?",
             (stage, nxt, date.today().isoformat(), mastery, qid))
+        log_edit(db, "interview_questions", qid, "复习打卡",
+                 f"阶段 {stage}，下次 {nxt}")
         db.commit()
     return redirect(request.referrer or url_for("interview_page"))
 
@@ -1470,6 +1504,8 @@ def update_book_progress(book_id):
             status = "读完"
         db.execute("UPDATE books SET read_pages=?, status=? WHERE id=?",
                    (read_pages, status, book_id))
+        log_edit(db, "books", book_id, "阅读进度",
+                 f"{row['read_pages']} → {read_pages} 页（{status}）")
         db.commit()
     return redirect(url_for("books_page"))
 
@@ -1527,8 +1563,14 @@ def add_crash():
 @login_required
 def resolve_crash(crash_id):
     db = get_db()
+    old = db.execute("SELECT status FROM crashes WHERE id=?",
+                     (crash_id,)).fetchone()
     db.execute("UPDATE crashes SET status = CASE status WHEN '待分析' THEN '已修复' "
                "ELSE '待分析' END WHERE id=?", (crash_id,))
+    if old:
+        nxt = "已修复" if old["status"] == "待分析" else "待分析"
+        log_edit(db, "crashes", crash_id, "状态变更",
+                 f"{old['status']} → {nxt}")
     db.commit()
     return redirect(request.referrer or url_for("crashes_page"))
 
@@ -1710,10 +1752,16 @@ def add_driver():
 @login_required
 def cycle_driver_recommend(driver_id):
     db = get_db()
+    old = db.execute("SELECT recommend FROM drivers WHERE id=?",
+                     (driver_id,)).fetchone()
     db.execute(
         "UPDATE drivers SET recommend = CASE recommend "
         "WHEN '待验证' THEN '推荐' WHEN '推荐' THEN '有坑' ELSE '待验证' END "
         "WHERE id=?", (driver_id,))
+    if old:
+        nxt = {"待验证": "推荐", "推荐": "有坑"}.get(old["recommend"], "待验证")
+        log_edit(db, "drivers", driver_id, "推荐状态",
+                 f"{old['recommend']} → {nxt}")
     db.commit()
     return redirect(request.referrer or url_for("drivers_page"))
 
@@ -1827,10 +1875,17 @@ def add_test_item():
 @login_required
 def cycle_test_result(item_id):
     db = get_db()
+    old = db.execute("SELECT result FROM test_matrix WHERE id=?",
+                     (item_id,)).fetchone()
     db.execute(
         "UPDATE test_matrix SET result = CASE result "
         "WHEN '未测' THEN '通过' WHEN '通过' THEN '失败' WHEN '失败' THEN '阻塞' ELSE '未测' END "
         "WHERE id=?", (item_id,))
+    if old:
+        nxt = {"未测": "通过", "通过": "失败", "失败": "阻塞"}.get(
+            old["result"], "未测")
+        log_edit(db, "test_matrix", item_id, "测试结果",
+                 f"{old['result']} → {nxt}")
     db.commit()
     return redirect(request.referrer or url_for("test_matrix_page"))
 
@@ -2135,8 +2190,10 @@ def add_checklist():
 @login_required
 def done_checklist(item_id):
     db = get_db()
+    today = date.today().isoformat()
     db.execute("UPDATE checklists SET last_done=? WHERE id=?",
-               (date.today().isoformat(), item_id))
+               (today, item_id))
+    log_edit(db, "checklists", item_id, "巡检完成", today)
     db.commit()
     return redirect(request.referrer or url_for("checklist_page"))
 
@@ -2455,6 +2512,51 @@ def probe_all_printers():
                       for x in low_all))
     return jsonify({"ok": True, "total": len(rows), "online": online,
                     "results": results})
+
+
+# ---------- 变更历史 ----------
+
+EDIT_MODULE_LABELS = {
+    "work_logs": "工作记录", "study_notes": "学习笔记", "todos": "待办",
+    "diaries": "日记", "habits": "习惯", "bugs": "Bug",
+    "roadmap_topics": "学习路线", "snippets": "代码片段",
+    "releases": "发版", "interview_questions": "面试题",
+    "compile_errors": "编译错误", "perf_records": "性能",
+    "commands": "命令", "books": "读书", "crashes": "崩溃",
+    "drivers": "驱动", "protocols": "协议", "test_matrix": "测试矩阵",
+    "error_codes": "错误码", "log_patterns": "日志模式",
+    "printers": "机型", "checklists": "巡检",
+}
+
+
+@app.route("/history")
+@login_required
+def history_page():
+    db = get_db()
+    module = request.args.get("module", "").strip()
+    page = max(1, int(request.args.get("page", 1) or 1))
+    per_page = 50
+    sql = "SELECT * FROM edit_history"
+    params = []
+    if module:
+        sql += " WHERE module=?"
+        params.append(module)
+    total = db.execute(
+        sql.replace("SELECT *", "SELECT COUNT(*)"), params).fetchone()[0]
+    sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    params += [per_page, (page - 1) * per_page]
+    rows = db.execute(sql, params).fetchall()
+    modules = [r[0] for r in db.execute(
+        "SELECT DISTINCT module FROM edit_history ORDER BY module").fetchall()]
+    items = [{"id": r["id"], "module": r["module"],
+              "label": EDIT_MODULE_LABELS.get(r["module"], r["module"]),
+              "ref_id": r["ref_id"], "action": r["action"],
+              "detail": r["detail"], "created_at": r["created_at"]}
+             for r in rows]
+    pages = max(1, (total + per_page - 1) // per_page)
+    return render_template("history.html", items=items, total=total,
+                           module=module, modules=modules, page=page,
+                           pages=pages, labels=EDIT_MODULE_LABELS)
 
 
 # ---------- 回收站 ----------
@@ -2940,6 +3042,132 @@ def export_data():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "time": datetime.now().isoformat(timespec="seconds")})
+
+
+# ---------- 运维看板 ----------
+
+BACKUP_DIR = "/root/workbench/backups"
+STATUS_UNITS = [
+    ("workbench.service", "主服务"),
+    ("workbench-backup.timer", "每日备份"),
+    ("workbench-printer-probe.timer", "打印机巡检"),
+]
+
+
+def _unit_state(unit):
+    """读取 systemd 单元状态，失败时返回降级信息而不抛错。"""
+    try:
+        out = subprocess.run(
+            ["systemctl", "show", unit, "-p", "ActiveState", "-p", "Result",
+             "-p", "NextElapseUSecRealtime"],
+            capture_output=True, text=True, timeout=5).stdout
+        info = {}
+        for line in out.splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                info[k] = v
+        return {"unit": unit, "active": info.get("ActiveState", "unknown"),
+                "result": info.get("Result", ""),
+                "next": info.get("NextElapseUSecRealtime", "")}
+    except (OSError, subprocess.SubprocessError):
+        return {"unit": unit, "active": "unknown", "result": "", "next": ""}
+
+
+@app.route("/status")
+@login_required
+def status_page():
+    db = get_db()
+    info = {}
+
+    # 数据库状态
+    try:
+        info["journal_mode"] = db.execute("PRAGMA journal_mode").fetchone()[0]
+    except sqlite3.DatabaseError:
+        info["journal_mode"] = "unknown"
+    db_file = DB_PATH
+    if os.path.exists(db_file):
+        info["db_size"] = os.path.getsize(db_file)
+        info["db_mtime"] = datetime.fromtimestamp(
+            os.path.getmtime(db_file)).strftime("%Y-%m-%d %H:%M")
+    else:
+        info["db_size"] = 0
+        info["db_mtime"] = "-"
+
+    # 各表行数
+    tables = []
+    try:
+        names = [r[0] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name").fetchall()]
+        for name in names:
+            try:
+                cnt = db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+            except sqlite3.DatabaseError:
+                cnt = -1
+            tables.append({"name": name, "count": cnt})
+    except sqlite3.DatabaseError:
+        pass
+
+    # 备份归档
+    backups = []
+    if os.path.isdir(BACKUP_DIR):
+        try:
+            files = sorted(os.listdir(BACKUP_DIR), reverse=True)[:8]
+            for fn in files:
+                fp = os.path.join(BACKUP_DIR, fn)
+                if os.path.isfile(fp):
+                    backups.append({
+                        "name": fn,
+                        "size": os.path.getsize(fp),
+                        "mtime": datetime.fromtimestamp(
+                            os.path.getmtime(fp)).strftime("%Y-%m-%d %H:%M"),
+                    })
+        except OSError:
+            pass
+    total_backups = 0
+    if os.path.isdir(BACKUP_DIR):
+        try:
+            total_backups = len([f for f in os.listdir(BACKUP_DIR)
+                                 if f.endswith(".json")])
+        except OSError:
+            pass
+
+    # systemd 单元
+    units = []
+    for unit, label in STATUS_UNITS:
+        st = _unit_state(unit)
+        st["label"] = label
+        units.append(st)
+
+    # 最近探测日志
+    probes = []
+    try:
+        rows = db.execute(
+            "SELECT l.printer_id, l.ok, l.checked_at, p.model "
+            "FROM printer_probe_logs l "
+            "LEFT JOIN printers p ON p.id = l.printer_id "
+            "ORDER BY l.id DESC LIMIT 10").fetchall()
+        for r in rows:
+            probes.append({"printer_id": r["printer_id"],
+                           "model": r["model"] or "(已删除)",
+                           "ok": bool(r["ok"]),
+                           "checked_at": r["checked_at"]})
+    except sqlite3.DatabaseError:
+        pass
+
+    # 关键计数的概览
+    summary = {}
+    for key in ("edit_history", "trash", "printer_probe_logs"):
+        try:
+            summary[key] = db.execute(
+                f"SELECT COUNT(*) FROM {key}").fetchone()[0]
+        except sqlite3.DatabaseError:
+            summary[key] = -1
+
+    return render_template("status.html", info=info, tables=tables,
+                           backups=backups, total_backups=total_backups,
+                           units=units, probes=probes, summary=summary,
+                           checked_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
 if __name__ == "__main__":

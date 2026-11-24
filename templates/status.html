@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}运维看板 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🩺 运维看板</h1>
+<p class="muted">采集时间 {{ checked_at }}</p>
+
+<section class="card">
+  <h2>系统单元</h2>
+  <ul class="list">
+    {% for u in units %}
+    <li>
+      <span class="cat">{{ u.label }}</span>
+      <strong class="{{ 'ok-text' if u.active == 'active' else 'warn-text' }}">{{ u.active }}</strong>
+      <span class="muted">{{ u.unit }}</span>
+      {% if u.result %}<span class="muted">结果 {{ u.result }}</span>{% endif %}
+      {% if u.next %}<span class="muted">下次 {{ u.next }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
+  <h2>数据库</h2>
+  <ul class="list">
+    <li><span class="cat">日志模式</span><strong>{{ info.journal_mode }}</strong>{% if info.journal_mode != 'wal' %}<span class="muted">（建议为 wal）</span>{% endif %}</li>
+    <li><span class="cat">文件大小</span>{{ (info.db_size / 1024) | round(1) }} KB</li>
+    <li><span class="cat">最后修改</span>{{ info.db_mtime }}</li>
+    <li><span class="cat">回收站</span>{{ summary.trash }} 条</li>
+    <li><span class="cat">变更历史</span>{{ summary.edit_history }} 条</li>
+    <li><span class="cat">探测日志</span>{{ summary.printer_probe_logs }} 条</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>备份归档（共 {{ total_backups }} 份）</h2>
+  {% if backups %}
+  <ul class="list">
+    {% for b in backups %}
+    <li><span class="date">{{ b.mtime }}</span><span class="muted">{{ b.name }}</span><span class="cat">{{ (b.size / 1024) | round(1) }} KB</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="empty">暂无备份归档。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>最近打印机探测</h2>
+  {% if probes %}
+  <ul class="list">
+    {% for p in probes %}
+    <li>
+      <span class="cat">{{ p.model }}</span>
+      <strong class="{{ 'ok-text' if p.ok else 'warn-text' }}">{{ '在线' if p.ok else '离线' }}</strong>
+      <span class="muted">{{ p.checked_at }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="empty">还没有探测记录。到机型页点击『全部检测』即可生成。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>数据表行数</h2>
+  <div class="grid-2">
+    {% for t in tables %}
+    <div class="inline" style="justify-content: space-between; padding: 3px 0">
+      <span class="muted">{{ t.name }}</span>
+      <span class="cat">{{ t.count }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<style>
+  .ok-text { color: #16a34a; }
+  .warn-text { color: #dc2626; }
+  html.dark .ok-text { color: #4ade80; }
+  html.dark .warn-text { color: #f87171; }
+</style>
+{% endblock %}
