@@ -7,6 +7,7 @@ import functools
 import hashlib
 import json
 import os
+import re
 import secrets
 import socket
 import sqlite3
@@ -17,7 +18,7 @@ from datetime import date, datetime, timedelta
 import markdown as md_lib
 from flask import (Flask, Response, g, jsonify, redirect, render_template,
                    request, session, url_for)
-from markupsafe import Markup
+from markupsafe import Markup, escape
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("WORKBENCH_DB", "/root/workbench.db")
@@ -259,6 +260,15 @@ CREATE TABLE IF NOT EXISTS trash (
     payload TEXT NOT NULL,
     deleted_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS printer_probe_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    printer_id INTEGER NOT NULL,
+    ok INTEGER DEFAULT 0,
+    detail TEXT DEFAULT '',
+    checked_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_probe_logs_printer
+    ON printer_probe_logs (printer_id, id DESC);
 """
 
 MIGRATIONS = [
@@ -362,8 +372,15 @@ def render_markdown(text):
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
+        g.db = sqlite3.connect(DB_PATH, timeout=10)
         g.db.row_factory = sqlite3.Row
+        # WAL 提升读写并发，busy_timeout 避免瞬时写冲突直接抛 database is locked
+        try:
+            g.db.execute("PRAGMA busy_timeout=5000")
+            g.db.execute("PRAGMA journal_mode=WAL")
+            g.db.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.DatabaseError:
+            pass
     return g.db
 
 
@@ -1981,7 +1998,19 @@ def printers_page():
         sql += " AND (model LIKE ? OR languages LIKE ? OR location LIKE ? OR owner LIKE ? OR notes LIKE ?)"
         params += [f"%{q}%"] * 5
     sql += " ORDER BY model"
-    printers = db.execute(sql, params).fetchall()
+    rows = db.execute(sql, params).fetchall()
+    last = {}
+    for r in db.execute(
+            "SELECT printer_id, ok, checked_at FROM printer_probe_logs "
+            "WHERE id IN (SELECT MAX(id) FROM printer_probe_logs "
+            "GROUP BY printer_id)").fetchall():
+        last[r["printer_id"]] = {"ok": bool(r["ok"]),
+                                 "checked_at": r["checked_at"]}
+    printers = []
+    for r in rows:
+        item = dict(r)
+        item["last_probe"] = last.get(r["id"])
+        printers.append(item)
     return render_template("printers.html", printers=printers,
                            duplex_types=DUPLEX_TYPES, q=q)
 
@@ -2230,6 +2259,7 @@ IMPORT_TABLES = {
                      "created_at"],
     "printers": ["model", "languages", "duplex", "trays", "memory", "ip",
                  "location", "owner", "notes", "created_at"],
+    "printer_probe_logs": ["printer_id", "ok", "detail", "checked_at"],
     "roadmap_topics": ["topic", "category", "status", "progress", "note", "created_at"],
     "habits": ["name", "target_days", "created_at"],
     "habit_logs": ["habit_id", "log_date", "created_at"],
@@ -2281,6 +2311,84 @@ PRINTER_OIDS = {
     "总打印页数": "1.3.6.1.2.1.43.10.2.1.4.1.1",
 }
 
+# 打印机耗材相关 OID（43.11.1.1.x.1.<index>）
+SUPPLY_OIDS = {
+    "desc": "1.3.6.1.2.1.43.11.1.1.6.1.",
+    "max": "1.3.6.1.2.1.43.11.1.1.8.1.",
+    "level": "1.3.6.1.2.1.43.11.1.1.9.1.",
+}
+SUPPLY_MAX_INDEX = 4
+SUPPLY_LOW_PERCENT = 15
+
+
+def _snmp_value(ip, oid):
+    """取单个 OID 的值：INTEGER 返回 int，其余返回去空白字符串；失败返回 None。"""
+    got = snmp_get(ip, oid)
+    if not got:
+        return None
+    tag, raw = got
+    if tag == 0x02 and raw:
+        return int.from_bytes(raw, "big")
+    if not raw:
+        return ""
+    return raw.decode("utf-8", "replace").strip()
+
+
+def _collect_supplies(ip):
+    """按索引遍历耗材，返回 [{'name','level','max','percent'}]。"""
+    supplies = []
+    seen = set()
+    for idx in range(1, SUPPLY_MAX_INDEX + 1):
+        name = _snmp_value(ip, SUPPLY_OIDS["desc"] + str(idx))
+        level = _snmp_value(ip, SUPPLY_OIDS["level"] + str(idx))
+        total = _snmp_value(ip, SUPPLY_OIDS["max"] + str(idx))
+        name = name.strip() if isinstance(name, str) else ""
+        # 无名称且无量值的索引视为设备不支持，直接跳过
+        if not name and not isinstance(level, int):
+            continue
+        label = name or ("耗材" + str(idx))
+        key = (label, level if isinstance(level, int) else None)
+        if key in seen:
+            continue
+        seen.add(key)
+        item = {"name": label}
+        if isinstance(level, int):
+            item["level"] = level
+        if isinstance(total, int):
+            item["max"] = total
+        if isinstance(level, int) and isinstance(total, int) and total > 0:
+            item["percent"] = max(0, min(100, round(level * 100 / total)))
+        supplies.append(item)
+    return supplies
+
+
+def _probe_once(ip):
+    """探测单台设备，成功返回 items 字典，无响应返回 None。"""
+    desc = _snmp_value(ip, PRINTER_OIDS["设备描述"])
+    if desc is None:
+        return None
+    items = {"设备描述": desc if isinstance(desc, str) else str(desc)}
+    pages = _snmp_value(ip, PRINTER_OIDS["总打印页数"])
+    if pages not in (None, ""):
+        items["总打印页数"] = str(pages)
+    supplies = _collect_supplies(ip)
+    if supplies:
+        items["耗材"] = supplies
+    return items
+
+
+def _record_probe(db, printer_id, ok, detail):
+    """记录一次探测结果，失败不影响主流程。"""
+    try:
+        db.execute(
+            "INSERT INTO printer_probe_logs (printer_id, ok, detail, checked_at) "
+            "VALUES (?,?,?,?)",
+            (printer_id, 1 if ok else 0, str(detail)[:2000],
+             datetime.now().isoformat(timespec="seconds")))
+        db.commit()
+    except sqlite3.DatabaseError:
+        pass
+
 
 @app.route("/api/printers/<int:printer_id>/probe", methods=["POST"])
 @login_required
@@ -2290,20 +2398,63 @@ def probe_printer(printer_id):
     if not p:
         return jsonify({"ok": False, "error": "机型不存在"})
     if not p["ip"]:
+        _record_probe(db, printer_id, False, "未配置 IP")
         return jsonify({"ok": False, "error": "该机型未配置 IP 地址"})
-    desc = snmp_get(p["ip"], PRINTER_OIDS["设备描述"])
-    if desc is None:
+    items = _probe_once(p["ip"])
+    if items is None:
+        _record_probe(db, printer_id, False, "SNMP 无响应")
         return jsonify({"ok": False,
                         "error": "SNMP 无响应（设备离线、未开启 SNMP 或网络不可达）"})
-    items = {"设备描述": desc[1].decode("utf-8", "replace")}
-    pages = snmp_get(p["ip"], PRINTER_OIDS["总打印页数"])
-    if pages:
-        tag, raw = pages
-        if tag == 0x02 and raw:
-            items["总打印页数"] = str(int.from_bytes(raw, "big"))
-        elif raw:
-            items["总打印页数"] = raw.decode("utf-8", "replace")
+    low = [s for s in items.get("耗材", [])
+           if s.get("percent") is not None
+           and s["percent"] <= SUPPLY_LOW_PERCENT]
+    if low:
+        names = "、".join(
+            "%s(%d%%)" % (s["name"], s["percent"]) for s in low)
+        items["低耗材告警"] = names
+        notify_webhook("打印机耗材不足",
+                       "%s（%s）：%s" % (p["model"], p["ip"], names))
+    _record_probe(db, printer_id, True, str(items)[:1000])
     return jsonify({"ok": True, "ip": p["ip"], "items": items})
+
+
+@app.route("/api/printers/probe_all", methods=["POST"])
+@login_required
+def probe_all_printers():
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, model, ip FROM printers WHERE ip != '' ORDER BY id"
+    ).fetchall()
+    results = []
+    online = 0
+    for r in rows:
+        items = _probe_once(r["ip"])
+        if items is None:
+            _record_probe(db, r["id"], False, "SNMP 无响应")
+            results.append({"id": r["id"], "model": r["model"],
+                            "ip": r["ip"], "ok": False,
+                            "error": "SNMP 无响应"})
+            continue
+        online += 1
+        low = [s for s in items.get("耗材", [])
+               if s.get("percent") is not None
+               and s["percent"] <= SUPPLY_LOW_PERCENT]
+        if low:
+            items["低耗材告警"] = "、".join(
+                "%s(%d%%)" % (s["name"], s["percent"]) for s in low)
+        _record_probe(db, r["id"], True, str(items)[:1000])
+        results.append({"id": r["id"], "model": r["model"],
+                        "ip": r["ip"], "ok": True, "items": items})
+    low_all = [x for x in results
+               if x.get("ok") and x.get("items", {}).get("低耗材告警")]
+    if low_all:
+        notify_webhook(
+            "打印机批量巡检：%d 台耗材不足" % len(low_all),
+            "\n".join("%s（%s）：%s" % (x["model"], x["ip"],
+                                       x["items"]["低耗材告警"])
+                      for x in low_all))
+    return jsonify({"ok": True, "total": len(rows), "online": online,
+                    "results": results})
 
 
 # ---------- 回收站 ----------
@@ -2409,80 +2560,182 @@ def test_notify():
         msg="测试通知已发送" if ok else "发送失败：请检查 Webhook 地址与启用开关"))
 
 
-# ---------- 全局搜索 ----------
+# ---------- 全局搜索（多关键词加权打分 + 高亮片段） ----------
 
-@app.route("/search")
+SEARCH_TARGETS = [
+    ('work_logs', '工作记录', '📋', 'work_page',
+     [('title', 10), ('tags', 6), ('content', 3)], 'log_date'),
+    ('study_notes', '学习笔记', '📚', 'study_page',
+     [('topic', 10), ('category', 5), ('content', 3)], 'category'),
+    ('todos', '待办事项', '✅', 'todo_page',
+     [('title', 10), ('priority', 3)], 'due_date'),
+    ('diaries', '日记', '📔', 'diary_page',
+     [('content', 10), ('mood', 4)], 'diary_date'),
+    ('bugs', 'Bug 追踪', '🐛', 'bugs_page',
+     [('title', 10), ('phenomenon', 6), ('root_cause', 5), ('solution', 5),
+      ('platform', 4), ('severity', 2)], 'status'),
+    ('snippets', '代码片段', '✂️', 'snippets_page',
+     [('title', 10), ('tags', 6), ('language', 4), ('code', 3)], 'language'),
+    ('commands', '命令速查', '⌨️', 'commands_page',
+     [('name', 10), ('command', 7), ('description', 4), ('category', 3)], 'category'),
+    ('compile_errors', '编译错误', '🔧', 'compile_errors_page',
+     [('error_msg', 10), ('solution', 6), ('root_cause', 5), ('compiler', 3)], 'compiler'),
+    ('interview_questions', '面试题集', '💼', 'interview_page',
+     [('question', 10), ('answer', 6), ('category', 3)], 'category'),
+    ('perf_records', '性能优化', '⚡', 'perf_page',
+     [('title', 10), ('detail', 6), ('technique', 5), ('target', 3)], 'target'),
+    ('books', '读书笔记', '📖', 'books_page',
+     [('title', 10), ('author', 5), ('note', 4), ('category', 3)], 'author'),
+    ('crashes', '崩溃档案', '💥', 'crashes_page',
+     [('title', 10), ('stack', 6), ('root_cause', 5), ('signal', 3)], 'status'),
+    ('drivers', '驱动记录', '🧩', 'drivers_page',
+     [('model', 10), ('driver_version', 6), ('changes', 5),
+      ('known_issues', 4)], 'driver_version'),
+    ('protocols', '协议笔记', '📡', 'protocols_page',
+     [('title', 10), ('summary', 6), ('commands', 4), ('notes', 4)], 'category'),
+    ('test_matrix', '测试矩阵', '🧪', 'test_matrix_page',
+     [('test_item', 10), ('model', 6), ('driver_version', 5), ('note', 4)], 'result'),
+    ('error_codes', '错误码', '🔢', 'error_codes_page',
+     [('code', 10), ('title', 8), ('description', 6), ('solution', 5),
+      ('brand', 3)], 'brand'),
+    ('log_patterns', '日志模式', '🧾', 'log_analysis_page',
+     [('title', 10), ('pattern', 7), ('interpretation', 5), ('action', 4)], ''),
+    ('printers', '机型档案', '🖨', 'printers_page',
+     [('model', 10), ('location', 5), ('owner', 4), ('notes', 4),
+      ('languages', 3), ('ip', 3)], 'location'),
+]
+
+_COLUMN_CACHE = {}
+
+
+def _table_columns(db, table):
+    if table not in _COLUMN_CACHE:
+        try:
+            _COLUMN_CACHE[table] = [r[1] for r in db.execute(
+                f'PRAGMA table_info({table})').fetchall()]
+        except sqlite3.DatabaseError:
+            _COLUMN_CACHE[table] = []
+    return _COLUMN_CACHE[table]
+
+
+def _search_tokens(q):
+    return [t for t in (q or '').split() if t]
+
+
+def _highlight(text, tokens, limit=None):
+    s = '' if text is None else str(text)
+    if limit and len(s) > limit:
+        s = s[:limit] + '…'
+    out = str(escape(s))
+    for t in sorted({t for t in tokens if t}, key=len, reverse=True):
+        pat = re.compile(re.escape(str(escape(t))), re.IGNORECASE)
+        out = pat.sub(lambda m: '<mark>' + m.group(0) + '</mark>', out)
+    return Markup(out)
+
+
+def _snippet(text, tokens, width=100):
+    s = '' if text is None else str(text).replace('\n', ' ')
+    if not s.strip():
+        return Markup('')
+    low = s.lower()
+    pos = -1
+    for t in tokens:
+        p = low.find(t.lower())
+        if p >= 0 and (pos < 0 or p < pos):
+            pos = p
+    if pos < 0:
+        return _highlight(s, tokens, width)
+    start = max(0, pos - width // 3)
+    end = min(len(s), start + width)
+    frag = s[start:end]
+    if start > 0:
+        frag = '…' + frag
+    if end < len(s):
+        frag = frag + '…'
+    return _highlight(frag, tokens)
+
+
+@app.route('/search')
 @login_required
 def global_search():
-    q = request.args.get("q", "").strip()
-    results = {}
-    if q:
-        like = f"%{q}%"
+    q = request.args.get('q', '').strip()
+    tokens = _search_tokens(q)
+    groups = []
+    total = 0
+    if tokens:
         db = get_db()
-        results["work_logs"] = db.execute(
-            "SELECT * FROM work_logs WHERE title LIKE ? OR content LIKE ? OR tags LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
-        results["study_notes"] = db.execute(
-            "SELECT * FROM study_notes WHERE topic LIKE ? OR content LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
-        results["todos"] = db.execute(
-            "SELECT * FROM todos WHERE title LIKE ? ORDER BY id DESC LIMIT 10",
-            (like,)).fetchall()
-        results["diaries"] = db.execute(
-            "SELECT * FROM diaries WHERE content LIKE ? ORDER BY diary_date DESC LIMIT 10",
-            (like,)).fetchall()
-        results["bugs"] = db.execute(
-            "SELECT * FROM bugs WHERE title LIKE ? OR phenomenon LIKE ? OR solution LIKE ? "
-            "OR model LIKE ? OR driver_version LIKE ? ORDER BY id DESC LIMIT 10",
-            (like, like, like, like, like)).fetchall()
-        results["snippets"] = db.execute(
-            "SELECT * FROM snippets WHERE title LIKE ? OR code LIKE ? OR tags LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
-        results["commands"] = db.execute(
-            "SELECT * FROM commands WHERE name LIKE ? OR command LIKE ? OR description LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
-        results["compile_errors"] = db.execute(
-            "SELECT * FROM compile_errors WHERE error_msg LIKE ? OR solution LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
-        results["interview_questions"] = db.execute(
-            "SELECT * FROM interview_questions WHERE question LIKE ? OR answer LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
-        results["perf_records"] = db.execute(
-            "SELECT * FROM perf_records WHERE title LIKE ? OR detail LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
-        results["books"] = db.execute(
-            "SELECT * FROM books WHERE title LIKE ? OR note LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like)).fetchall()
-        results["crashes"] = db.execute(
-            "SELECT * FROM crashes WHERE title LIKE ? OR stack LIKE ? OR root_cause LIKE ? "
-            "ORDER BY id DESC LIMIT 10", (like, like, like)).fetchall()
-        results["drivers"] = db.execute(
-            "SELECT * FROM drivers WHERE model LIKE ? OR driver_version LIKE ? OR changes LIKE ? "
-            "OR known_issues LIKE ? ORDER BY id DESC LIMIT 10",
-            (like, like, like, like)).fetchall()
-        results["protocols"] = db.execute(
-            "SELECT * FROM protocols WHERE title LIKE ? OR summary LIKE ? OR commands LIKE ? "
-            "OR notes LIKE ? ORDER BY id DESC LIMIT 10",
-            (like, like, like, like)).fetchall()
-        results["test_matrix"] = db.execute(
-            "SELECT * FROM test_matrix WHERE driver_version LIKE ? OR model LIKE ? "
-            "OR test_item LIKE ? OR note LIKE ? ORDER BY id DESC LIMIT 10",
-            (like, like, like, like)).fetchall()
-        results["error_codes"] = db.execute(
-            "SELECT * FROM error_codes WHERE brand LIKE ? OR code LIKE ? OR title LIKE ? "
-            "OR description LIKE ? OR solution LIKE ? ORDER BY id DESC LIMIT 10",
-            (like, like, like, like, like)).fetchall()
-        results["log_patterns"] = db.execute(
-            "SELECT * FROM log_patterns WHERE title LIKE ? OR pattern LIKE ? "
-            "OR interpretation LIKE ? OR action LIKE ? ORDER BY id DESC LIMIT 10",
-            (like, like, like, like)).fetchall()
-        results["printers"] = db.execute(
-            "SELECT * FROM printers WHERE model LIKE ? OR languages LIKE ? OR location LIKE ? "
-            "OR owner LIKE ? OR notes LIKE ? ORDER BY id DESC LIMIT 10",
-            (like, like, like, like, like)).fetchall()
-        results = {k: v for k, v in results.items() if v}
-    total = sum(len(v) for v in results.values())
-    return render_template("search.html", q=q, results=results, total=total)
+        for table, label, icon, endpoint, fields, meta_col in SEARCH_TARGETS:
+            cols = _table_columns(db, table)
+            usable = [(f, w) for f, w in fields if f in cols]
+            if not usable or 'id' not in cols:
+                continue
+            primary = usable[0][0]
+            one = ' OR '.join(f'{f} LIKE ?' for f, _w in usable)
+            where = ' OR '.join(f'({one})' for _t in tokens)
+            params = []
+            for _t in tokens:
+                for f, _w in usable:
+                    params.append('%' + _t + '%')
+            picked = ['id']
+            for f, _w in usable:
+                if f not in picked:
+                    picked.append(f)
+            has_meta = bool(meta_col) and meta_col in cols
+            if has_meta and meta_col not in picked:
+                picked.append(meta_col)
+            sql = ('SELECT ' + ', '.join(picked) + f' FROM {table} '
+                   f'WHERE {where} ORDER BY id DESC LIMIT 200')
+            try:
+                rows = db.execute(sql, params).fetchall()
+            except sqlite3.DatabaseError:
+                continue
+            hits = []
+            for row in rows:
+                score = 0
+                best = (0, '')
+                matched = set()
+                for f, w in usable:
+                    val = row[f]
+                    if not val:
+                        continue
+                    vs = str(val)
+                    low = vs.lower()
+                    cnt = 0
+                    for t in tokens:
+                        c = low.count(t.lower())
+                        cnt += c
+                        if c:
+                            matched.add(t)
+                    if not cnt:
+                        continue
+                    fs = cnt * w
+                    if f == primary:
+                        fs += 15 * len(matched)
+                    score += fs
+                    if f != primary and fs > best[0]:
+                        best = (fs, vs)
+                if score <= 0:
+                    continue
+                # 同时命中多个关键词的记录优先展示
+                score += 30 * len(matched)
+                raw_title = row[primary]
+                hits.append({
+                    'id': row['id'],
+                    'title': _highlight(raw_title if raw_title else '(无标题)',
+                                        tokens, 80),
+                    'snippet': _snippet(best[1], tokens) if best[1] else Markup(''),
+                    'meta': (str(row[meta_col])
+                             if has_meta and row[meta_col] else ''),
+                    'score': score,
+                })
+            if not hits:
+                continue
+            hits.sort(key=lambda h: (-h['score'], -h['id']))
+            top = hits[:10]
+            groups.append({'label': label, 'icon': icon,
+                           'endpoint': endpoint, 'items': top})
+            total += len(top)
+    return render_template('search.html', q=q, results=groups, total=total)
 
 
 # ---------- PWA ----------
@@ -2663,7 +2916,7 @@ def export_data():
     db = get_db()
     tables = ["work_logs", "study_notes", "todos", "templates", "diaries",
               "drivers", "protocols", "test_matrix", "error_codes", "log_patterns", "printers",
-              "checklists", "edit_history", "trash",
+              "checklists", "edit_history", "trash", "printer_probe_logs",
               "habits", "habit_logs", "bugs", "roadmap_topics", "snippets",
               "releases", "interview_questions", "compile_errors",
               "perf_records", "commands", "books"]
