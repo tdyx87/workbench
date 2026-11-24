@@ -429,6 +429,33 @@ def init_db():
             db.execute(
                 "INSERT INTO error_codes (brand, code, title, description, solution, created_at) "
                 "VALUES (?,?,?,?,?,?)", (b, code, t, desc, sol, now))
+    for c, n, cmd, d in DEV_AI_COMMANDS:
+        if not db.execute(
+                "SELECT 1 FROM commands WHERE name=? AND category=?",
+                (n, c)).fetchone():
+            db.execute(
+                "INSERT INTO commands (category, name, command, description, created_at) "
+                "VALUES (?,?,?,?,?)", (c, n, cmd, d, now))
+    nxt_review = (date.today() + timedelta(days=REVIEW_INTERVALS[0])).isoformat()
+    for q, a, cat in DEV_AI_QUESTIONS:
+        if not db.execute(
+                "SELECT 1 FROM interview_questions WHERE question=?", (q,)).fetchone():
+            db.execute(
+                "INSERT INTO interview_questions (question, answer, category, mastery, "
+                "next_review, review_stage, created_at) VALUES (?,?,?,0,?,0,?)",
+                (q, a, cat, nxt_review, now))
+    for t, lang, code, tags in DEV_AI_SNIPPETS:
+        if not db.execute(
+                "SELECT 1 FROM snippets WHERE title=?", (t,)).fetchone():
+            db.execute(
+                "INSERT INTO snippets (title, language, code, tags, created_at) "
+                "VALUES (?,?,?,?,?)", (t, lang, code, tags, now))
+    for name, cat, note in ROADMAP_SEED:
+        if not db.execute(
+                "SELECT 1 FROM roadmap_topics WHERE name=?", (name,)).fetchone():
+            db.execute(
+                "INSERT INTO roadmap_topics (name, category, progress, status, note, created_at) "
+                "VALUES (?,?,0,'未开始',?,?)", (name, cat, note, now))
     db.commit()
     db.close()
 
@@ -1386,6 +1413,107 @@ PRINT_COMMANDS = [
     ("打印调试", "PPD 语法检查", "cupstestppd -v driver.ppd", "验证自定义 PPD 文件是否符合规范"),
     ("打印调试", "Windows 驱动包管理", "printbrm -b -f backup.cab", "备份/还原打印机驱动与端口配置"),
     ("打印调试", "PJL 状态查询", "@PJL INFO STATUS", "向 9100 端口发送 PJL 指令查询打印机状态（USTATUS 可订阅事件）"),
+]
+
+# ---------- 开发进阶 + AI 开发命令（预置） ----------
+
+DEV_AI_COMMANDS = [
+    ("构建", "Ninja 并行构建", "cmake --build build -j$(nproc)", "全核并行编译，大项目显著提速"),
+    ("构建", "ccache 缓存加速", "export CXX='ccache g++'", "重复编译命中缓存，二次构建提速 5-10 倍"),
+    ("构建", "查看编译耗时", "time make -j$(nproc)", "评估构建优化前后的收益"),
+    ("静态分析", "clang-tidy 检查", "clang-tidy -p build src/*.cpp", "依赖 compile_commands.json，发现潜在缺陷与风格问题"),
+    ("静态分析", "cppcheck 全量检查", "cppcheck --enable=all --std=c++17 src/ 2>&1 | tee report.txt", "轻量级静态分析，无需编译数据库"),
+    ("静态分析", "编译警告全开", "-Wall -Wextra -Werror -Wconversion", "Werror 把警告当错误处理，CI 中防止代码劣化"),
+    ("性能剖析", "perf 采样分析", "perf record -g ./program && perf report", "定位 CPU 热点函数，-g 保留完整调用链"),
+    ("性能剖析", "valgrind 内存检查", "valgrind --leak-check=full --track-origins=yes ./program", "查内存泄漏与未初始化读取，程序会慢 10-50 倍"),
+    ("性能剖析", "heaptrack 堆分析", "heaptrack ./program && heaptrack_gui", "分析内存分配热点与峰值曲线"),
+    ("调试进阶", "addr2line 地址转行号", "addr2line -e ./program -f -C 0x00401234", "配合崩溃日志中的地址直接定位源码行号"),
+    ("调试进阶", "strace 跟踪系统调用", "strace -f -e trace=openat,connect ./program", "排查程序卡在哪个系统调用，驱动联调常用"),
+    ("调试进阶", "ltrace 跟踪库调用", "ltrace -f ./program", "跟踪动态库函数调用，定位第三方库传参问题"),
+    ("AI 开发", "Ollama 运行本地模型", "ollama run qwen2.5:7b", "一条命令拉取并启动对话，自动管理模型文件"),
+    ("AI 开发", "Ollama 查看模型", "ollama list && ollama ps", "查看已下载模型与运行中实例的显存占用"),
+    ("AI 开发", "llama.cpp 启动服务", "llama-server -m model.gguf -c 4096 -ngl 99 --port 8080", "提供 OpenAI 兼容接口，-ngl 99 全量卸载到 GPU"),
+    ("AI 开发", "GGUF 模型量化", "llama-quantize model-f16.gguf model-q4_k_m.gguf Q4_K_M", "量化到 Q4_K_M，7B 模型约 4GB 显存即可运行"),
+    ("AI 开发", "HF 模型转 GGUF", "python convert_hf_to_gguf.py ./hf_model --outfile model-f16.gguf", "llama.cpp 自带转换脚本，先转 F16 再量化"),
+    ("AI 开发", "下载 HuggingFace 模型", "huggingface-cli download Qwen/Qwen2.5-7B-Instruct --local-dir ./qwen2.5-7b", "支持断点续传，国内可配 HF_ENDPOINT 镜像加速"),
+    ("AI 开发", "查看 GPU 状态", "nvidia-smi -l 2", "每 2 秒刷新显存/利用率，推理压测时持续监控"),
+    ("AI 开发", "验证 PyTorch CUDA", "python3 -c \"import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))\"", "环境安装后的冒烟检查"),
+    ("AI 开发", "测试 OpenAI 兼容接口", "curl -s http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"local\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'", "本地推理服务部署后的接口验证"),
+    ("AI 开发", "推理性能基准", "llama-bench -m model.gguf -ngl 99", "输出 Prefill/Decode 的 token/s，评估量化与 GPU 卸载收益"),
+]
+
+# ---------- 开发进阶 + AI 方向面试题（预置） ----------
+
+DEV_AI_QUESTIONS = [
+    ("C++11 内存模型中 memory_order 各取值的含义？",
+     "- **relaxed**：仅保证原子性不保证顺序，适合计数器场景\n- **acquire（读）/ release（写）**：配对形成 synchronizes-with 关系，常用于自旋锁与标志位\n- **acq_rel**：读改写操作同时具备两者语义\n- **seq_cst（默认）**：全局顺序一致，最严格也最慢\n- 原则：先写对（seq_cst），确认是热点后再放松序",
+     "并发编程"),
+    ("什么是 SFINAE？C++20 concepts 如何改进它？",
+     "- SFINAE：替换失败不是错误，模板参数替换失败时仅从重载候选集中移除\n- 经典工具：std::enable_if、decltype、void_t\n- 缺点：语法晦涩、编译报错冗长难读\n- C++20 concepts：用 requires 表达式和 concept 直接声明约束，编译错误直指不满足的条件，可读性和诊断性大幅提升",
+     "模板元编程"),
+    ("什么是 false sharing（伪共享）？如何避免？",
+     "- 不同线程修改同一缓存行（通常 64 字节）中的不同变量，导致缓存一致性协议频繁失效\n- 现象：逻辑上无竞争但性能骤降\n- 避免：alignas(64) 对齐填充、线程局部存储、按线程分桶计数后归并\n- C++17 提供 std::hardware_destructive_interference_size 获取缓存行大小",
+     "并发编程"),
+    ("std::move 的本质是什么？移动构造何时被调用？",
+     "- std::move 只是 static_cast<T&&>，本身不移动任何东西\n- 移动语义靠移动构造/移动赋值实现；标记 noexcept 才会被 vector 扩容等场景采用\n- 触发时机：实参为将亡值（临时对象或 move 的结果）\n- 移动后的源对象处于有效但未指定状态，只能析构或重新赋值",
+     "C++ 基础"),
+    ("什么是 ABI 兼容性？动态库升级为什么可能导致崩溃？",
+     "- ABI 涵盖调用约定、符号修饰、类布局、vtable 布局、STL 容器二进制表示\n- 破坏 ABI 的常见操作：增删虚函数、改变成员变量顺序/类型、切换 _GLIBCXX_USE_CXX11_ABI\n- 打印驱动场景：厂商 .so 升级后未重新编译的调用方，可能因 vtable 偏移错乱直接崩溃\n- 对策：C 接口封装隔离 ABI、版本号检查、统一 ABI 标签重新编译",
+     "工程实践"),
+    ("LLM 推理的 Prefill 与 Decode 阶段有何区别？",
+     "- Prefill：并行处理全部输入 token，算力 bound，一次完成\n- Decode：逐 token 自回归生成，每步只算 1 个 token，显存带宽 bound（反复读取全量权重与 KV Cache）\n- 优化方向不同：Prefill 靠算力与并行度；Decode 靠量化、KV Cache 压缩、投机采样\n- 首 token 延迟取决于 Prefill，后续生成速度取决于 Decode",
+     "AI 推理"),
+    ("常见模型量化方案有哪些取舍？",
+     "- PTQ（训练后量化）：Q8_0/Q6_K/Q4_K_M，位数越低显存越小速度越快，精度损失递增\n- Q4_K_M 是社区公认甜点：7B 模型约 4GB，困惑度损失通常小于 1%\n- GPTQ/AWQ：按校准数据最小化量化误差，比朴素舍入更稳定\n- 注意：量化主要省显存与带宽，对 Prefill 阶段加速有限",
+     "AI 推理"),
+    ("RAG 的基本流程与关键优化点？",
+     "- 流程：文档切块 → embedding 向量化 → 向量检索 top-k → 拼入 prompt → 生成\n- 优化点：切块策略（按语义/标题边界）、混合检索（向量+BM25）、reranker 重排序、查询改写\n- 常见坑：块太大稀释关键信息、embedding 模型与语料语言不匹配\n- 评估：检索命中率与最终回答质量要分开度量",
+     "AI 应用"),
+    ("KV Cache 的作用是什么？显存开销如何估算？",
+     "- 自回归生成时缓存每层每个 token 的 K/V，避免重复计算\n- 显存约等于 2 × 层数 × hidden_size × 上下文长度 × 精度字节数\n- 长上下文下 KV Cache 可超过模型权重本身，是 vLLM PagedAttention 等优化的核心目标\n- GQA/MQA 通过共享 KV 头直接削减该项开销",
+     "AI 推理"),
+    ("Function Calling 的原理与典型工作流？",
+     "- 模型按 schema 输出结构化 JSON，指定要调用的工具与参数，由宿主程序真正执行\n- 流程：用户输入 → 模型决策调用工具 → 执行并回灌结果 → 模型生成最终回答\n- Agent = LLM + 工具调用 + 循环规划（ReAct 等模式）\n- 注意：参数校验与幂等设计必须在宿主侧兜底，不能信任模型输出",
+     "AI 应用"),
+]
+
+# ---------- 开发进阶 + AI 代码片段（预置） ----------
+
+DEV_AI_SNIPPETS = [
+    ("Python 调用 OpenAI 兼容接口（流式）", "python",
+     "import json\nimport requests\n\n\ndef chat_stream(prompt, base_url=\"http://127.0.0.1:8080\"):\n    \"\"\"调用 llama.cpp / vLLM 等本地推理服务，逐 token 产出\"\"\"\n    r = requests.post(\n        f\"{base_url}/v1/chat/completions\",\n        json={\"model\": \"local\",\n              \"messages\": [{\"role\": \"user\", \"content\": prompt}],\n              \"stream\": True},\n        stream=True, timeout=120)\n    for line in r.iter_lines():\n        if not line or not line.startswith(b\"data: \"):\n            continue\n        if line == b\"data: [DONE]\":\n            break\n        delta = json.loads(line[6:])[\"choices\"][0][\"delta\"]\n        if delta.get(\"content\"):\n            yield delta[\"content\"]\n\n\n# 使用\n# for chunk in chat_stream(\"解释什么是 KV Cache\"):\n#     print(chunk, end=\"\", flush=True)",
+     "AI,LLM,流式输出"),
+    ("C++ libcurl 调用本地 LLM 服务", "cpp",
+     "// g++ llm_call.cpp -o llm_call -lcurl\n#include <curl/curl.h>\n#include <string>\n\nstatic size_t write_cb(void* data, size_t size, size_t nmemb, std::string* out) {\n    out->append((char*)data, size * nmemb);\n    return size * nmemb;\n}\n\nstd::string chat(const std::string& prompt) {\n    CURL* curl = curl_easy_init();\n    std::string resp;\n    std::string body = std::string(\n        \"{\\\"model\\\":\\\"local\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"\"\n        ) + prompt + \"\\\"}]}\";\n    struct curl_slist* hdrs = nullptr;\n    hdrs = curl_slist_append(hdrs, \"Content-Type: application/json\");\n    curl_easy_setopt(curl, CURLOPT_URL,\n                     \"http://127.0.0.1:8080/v1/chat/completions\");\n    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);\n    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());\n    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);\n    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);\n    curl_easy_perform(curl);\n    curl_slist_free_all(hdrs);\n    curl_easy_cleanup(curl);\n    return resp;  // 解析 choices[0].message.content\n}",
+     "AI,HTTP,libcurl"),
+    ("C++ 极简线程池", "cpp",
+     "#include <condition_variable>\n#include <functional>\n#include <mutex>\n#include <queue>\n#include <thread>\n#include <vector>\n\nclass ThreadPool {\npublic:\n    explicit ThreadPool(size_t n) {\n        for (size_t i = 0; i < n; ++i)\n            workers_.emplace_back([this] {\n                while (true) {\n                    std::function<void()> task;\n                    {\n                        std::unique_lock<std::mutex> lk(mtx_);\n                        cv_.wait(lk, [this] { return stop_ || !tasks_.empty(); });\n                        if (stop_ && tasks_.empty()) return;\n                        task = std::move(tasks_.front());\n                        tasks_.pop();\n                    }\n                    task();\n                }\n            });\n    }\n    template <class F> void submit(F&& f) {\n        {\n            std::lock_guard<std::mutex> lk(mtx_);\n            tasks_.emplace(std::forward<F>(f));\n        }\n        cv_.notify_one();\n    }\n    ~ThreadPool() {\n        { std::lock_guard<std::mutex> lk(mtx_); stop_ = true; }\n        cv_.notify_all();\n        for (auto& w : workers_) w.join();\n    }\nprivate:\n    std::vector<std::thread> workers_;\n    std::queue<std::function<void()>> tasks_;\n    std::mutex mtx_;\n    std::condition_variable cv_;\n    bool stop_ = false;\n};",
+     "并发,线程池"),
+    ("CMake 现代目标式模板", "cmake",
+     "cmake_minimum_required(VERSION 3.20)\nproject(myapp LANGUAGES CXX)\n\nset(CMAKE_CXX_STANDARD 20)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\nset(CMAKE_EXPORT_COMPILE_COMMANDS ON)  # 供 clangd/clang-tidy 使用\n\nadd_executable(myapp\n    src/main.cpp\n    src/printer_driver.cpp\n)\n\ntarget_include_directories(myapp PRIVATE include)\ntarget_compile_options(myapp PRIVATE -Wall -Wextra -Werror)\ntarget_link_libraries(myapp PRIVATE pthread curl)\n\n# Debug 构建默认开启 AddressSanitizer\nif(CMAKE_BUILD_TYPE STREQUAL \"Debug\")\n    target_compile_options(myapp PRIVATE -fsanitize=address)\n    target_link_options(myapp PRIVATE -fsanitize=address)\nendif()",
+     "CMake,构建"),
+    ("nlohmann/json 配置读取", "cpp",
+     "#include <fstream>\n#include <nlohmann/json.hpp>\n#include <string>\n\nstruct AppConfig {\n    std::string listen = \"0.0.0.0\";\n    int port = 8080;\n    int workers = 2;\n\n    static AppConfig load(const std::string& path) {\n        std::ifstream ifs(path);\n        nlohmann::json j;\n        ifs >> j;\n        AppConfig cfg;\n        cfg.listen = j.value(\"listen\", cfg.listen);\n        cfg.port = j.value(\"port\", cfg.port);\n        cfg.workers = j.value(\"workers\", cfg.workers);\n        return cfg;  // j.value 提供默认值，字段缺失不抛异常\n    }\n};",
+     "JSON,配置"),
+]
+
+# ---------- 学习路线主题（预置） ----------
+
+ROADMAP_SEED = [
+    ("C++20 协程（coroutines）实战", "开发进阶",
+     "理解 promise_type/co_await 机制，把一个回调链改写为协程形式"),
+    ("CMake 工程化与依赖管理", "开发进阶",
+     "对比 FetchContent/vcpkg/conan 三种方案，统一项目构建规范"),
+    ("Sanitizer 全家桶接入 CI", "开发进阶",
+     "ASan/TSan/UBSan 分别跑核心测试用例，与崩溃档案模块联动记录"),
+    ("ABI 兼容性与动态库发布规范", "开发进阶",
+     "结合打印驱动 .so 分发场景，制定 C 接口封装与版本管理规范"),
+    ("本地部署 7B 推理服务并压测", "AI 工程",
+     "用 llama.cpp 或 vLLM 部署 Qwen2.5-7B，llama-bench 记录吞吐基线"),
+    ("RAG 最小可用实现", "AI 工程",
+     "embedding + 向量检索 + prompt 组装，把排障手册做成可问答的知识库"),
+    ("Function Calling 与 Agent 实践", "AI 工程",
+     "让模型调用本地工具（查错误码库/登记测试项），跑通一个完整工作流"),
 ]
 
 
