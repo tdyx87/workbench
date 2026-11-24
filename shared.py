@@ -12,7 +12,24 @@ from datetime import datetime
 from flask import g, jsonify, redirect, request, session, url_for
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("WORKBENCH_DB", "/root/workbench.db")
+
+
+def _env_path(name, default):
+    """路径配置：环境变量优先，否则落到项目目录内，保证换机器可直接运行。"""
+    value = os.environ.get(name)
+    if value:
+        return value
+    return os.path.join(BASE_DIR, default)
+
+
+# 数据库文件；服务器上用 WORKBENCH_DB 指向项目外路径，本地默认落在项目内
+DB_PATH = _env_path("WORKBENCH_DB", "workbench.db")
+# JSON 备份归档目录（/api/export 产物）
+BACKUP_DIR = _env_path("WORKBENCH_BACKUP_DIR", "backups")
+# 数据导入前的数据库快照目录
+SNAPSHOT_DIR = _env_path("WORKBENCH_SNAPSHOT_DIR", "db_backups")
+# 按表导入的预演临时文件目录
+IMPORT_TMP_DIR = _env_path("WORKBENCH_IMPORT_TMP", "tmp_import")
 AUTH_FILE = os.path.join(BASE_DIR, "auth.json")
 
 
