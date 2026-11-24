@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}回收站 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">🗑 回收站</h1>
+<section class="card">
+  <h2>已删除记录（{{ items|length }} 条）</h2>
+  <p class="muted">所有删除操作都会先归档到这里，可随时恢复；彻底删除后不可找回。</p>
+  {% if items %}
+  <div class="entries">
+    {% for it in items %}
+    <article class="entry">
+      <header>
+        <strong>{{ it.title or '（无标题）' }}</strong>
+        <span class="cat">{{ it.table }}</span>
+        <span class="cat">#{{ it.ref_id }}</span>
+      </header>
+      <p class="entry-body muted">删除时间：{{ it.deleted_at }}</p>
+      <footer class="entry-foot">
+        <form method="post" action="{{ url_for('restore_trash', trash_id=it.id) }}" class="inline" style="margin-left:0">
+          <button class="btn btn-sm" type="submit">恢复</button>
+        </form>
+        <form method="post" action="{{ url_for('purge_trash', trash_id=it.id) }}" class="inline" onsubmit="return confirm('彻底删除后无法恢复，确定继续？')">
+          <button class="btn-del" type="submit" title="彻底删除">×</button>
+        </form>
+      </footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">回收站是空的。</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -57,7 +57,7 @@
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>
-      {% if log.content %}<p class="entry-body">{{ log.content }}</p>{% endif %}
+      {% if log.content %}<div class="entry-body md-body">{{ log.content|md }}</div>{% endif %}
     </article>
     {% endfor %}
   </div>

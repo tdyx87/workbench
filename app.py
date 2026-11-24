@@ -8,7 +8,10 @@ import hashlib
 import json
 import os
 import secrets
+import socket
 import sqlite3
+import urllib.parse
+import urllib.request
 from datetime import date, datetime, timedelta
 
 import markdown as md_lib
@@ -249,6 +252,13 @@ CREATE TABLE IF NOT EXISTS edit_history (
     detail TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS trash (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    ref_id INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    deleted_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS = [
@@ -468,6 +478,123 @@ def _load_auth():
         return {}
 
 
+def _save_auth(data):
+    with open(AUTH_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def get_api_token():
+    """惰性生成并返回 API Token（存入 auth.json）。"""
+    auth = _load_auth()
+    token = auth.get("api_token")
+    if not token:
+        token = secrets.token_hex(20)
+        auth["api_token"] = token
+        _save_auth(auth)
+    return token
+
+
+def verify_api_token(token):
+    stored = _load_auth().get("api_token", "")
+    return bool(token and stored and secrets.compare_digest(token, stored))
+
+
+def notify_webhook(title, text):
+    """向配置的 Webhook（Server酱/通用 JSON）发送通知。"""
+    auth = _load_auth()
+    url = auth.get("notify_webhook", "")
+    if not (auth.get("notify_enabled") and url):
+        return False
+    try:
+        if "sctapi.ftqq.com" in url or "serverchan" in url:
+            body = urllib.parse.urlencode({"title": title, "desp": text}).encode()
+        else:
+            body = json.dumps({"title": title, "text": text}).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=body, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5).read()
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def archive_and_delete(db, table, item_id):
+    """删除前先把整行归档到 trash（回收站），再执行物理删除。"""
+    row = db.execute(f"SELECT * FROM {table} WHERE id=?", (item_id,)).fetchone()
+    if row:
+        db.execute(
+            "INSERT INTO trash (table_name, ref_id, payload, deleted_at) "
+            "VALUES (?,?,?,?)",
+            (table, item_id, json.dumps(dict(row), ensure_ascii=False),
+             datetime.now().isoformat(timespec="seconds")))
+    db.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
+
+
+# ---------- 原生 SNMP（最小 SNMPv2c GET，无需第三方库） ----------
+
+def _snmp_encode_oid(oid):
+    parts = [int(x) for x in oid.strip(".").split(".")]
+    out = bytes([40 * parts[0] + parts[1]])
+    for p in parts[2:]:
+        if p < 128:
+            out += bytes([p])
+        else:
+            stack = []
+            while p:
+                stack.append(p & 0x7F)
+                p >>= 7
+            out += bytes(b | (0x80 if i < len(stack) - 1 else 0)
+                         for i, b in enumerate(reversed(stack)))
+    return out
+
+
+def _snmp_tlv(tag, value):
+    n = len(value)
+    if n < 128:
+        return bytes([tag, n]) + value
+    if n < 256:
+        return bytes([tag, 0x81, n]) + value
+    return bytes([tag, 0x82, n >> 8, n & 0xFF]) + value
+
+
+def snmp_get(ip, oid, community="public", timeout=2.0):
+    """发送 SNMPv2c GetRequest，返回 (tag, value_bytes)；失败返回 None。"""
+    pkt = _snmp_tlv(0x30,
+                    _snmp_tlv(0x02, b"\x01") +
+                    _snmp_tlv(0x04, community.encode()) +
+                    _snmp_tlv(0xA0,
+                              _snmp_tlv(0x02, b"\x01") +
+                              _snmp_tlv(0x02, b"\x00") +
+                              _snmp_tlv(0x02, b"\x00") +
+                              _snmp_tlv(0x30,
+                                        _snmp_tlv(0x30,
+                                                  _snmp_tlv(0x06, _snmp_encode_oid(oid)) +
+                                                  _snmp_tlv(0x05, b"")))))
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(timeout)
+        s.sendto(pkt, (ip, 161))
+        data, _ = s.recvfrom(4096)
+        s.close()
+    except OSError:
+        return None
+    needle = _snmp_tlv(0x06, _snmp_encode_oid(oid))
+    idx = data.find(needle)
+    if idx < 0:
+        return None
+    pos = idx + len(needle)
+    if pos + 2 > len(data):
+        return None
+    tag = data[pos]
+    ln = data[pos + 1]
+    pos += 2
+    if ln & 0x80:
+        nbytes = ln & 0x7F
+        ln = int.from_bytes(data[pos:pos + nbytes], "big")
+        pos += nbytes
+    return tag, data[pos:pos + ln]
+
+
 def verify_password(password):
     stored = _load_auth().get("password_hash", "")
     if not stored:
@@ -479,6 +606,10 @@ def login_required(view):
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
         if not session.get("logged_in"):
+            if verify_api_token(request.headers.get("X-API-Token", "")):
+                return view(*args, **kwargs)
+            if request.path.startswith("/api/"):
+                return jsonify({"ok": False, "error": "unauthorized"}), 401
             return redirect(url_for("login", next=request.path))
         return view(*args, **kwargs)
     return wrapped
@@ -637,7 +768,7 @@ def add_work():
 @login_required
 def del_work(log_id):
     db = get_db()
-    db.execute("DELETE FROM work_logs WHERE id=?", (log_id,))
+    archive_and_delete(db, "work_logs", log_id)
     db.commit()
     return redirect(url_for("work_page"))
 
@@ -708,7 +839,7 @@ def mark_reviewed(note_id):
 @login_required
 def del_study(note_id):
     db = get_db()
-    db.execute("DELETE FROM study_notes WHERE id=?", (note_id,))
+    archive_and_delete(db, "study_notes", note_id)
     db.commit()
     return redirect(url_for("study_page"))
 
@@ -755,7 +886,7 @@ def toggle_todo(todo_id):
 @login_required
 def del_todo(todo_id):
     db = get_db()
-    db.execute("DELETE FROM todos WHERE id=?", (todo_id,))
+    archive_and_delete(db, "todos", todo_id)
     db.commit()
     return redirect(url_for("todo_page"))
 
@@ -799,7 +930,7 @@ def save_diary():
 @login_required
 def del_diary(diary_id):
     db = get_db()
-    db.execute("DELETE FROM diaries WHERE id=?", (diary_id,))
+    archive_and_delete(db, "diaries", diary_id)
     db.commit()
     return redirect(url_for("diary_page"))
 
@@ -864,7 +995,7 @@ def check_habit(habit_id):
 def del_habit(habit_id):
     db = get_db()
     db.execute("DELETE FROM habit_logs WHERE habit_id=?", (habit_id,))
-    db.execute("DELETE FROM habits WHERE id=?", (habit_id,))
+    archive_and_delete(db, "habits", habit_id)
     db.commit()
     return redirect(url_for("habit_page"))
 
@@ -940,7 +1071,7 @@ def resolve_bug(bug_id):
 @login_required
 def del_bug(bug_id):
     db = get_db()
-    db.execute("DELETE FROM bugs WHERE id=?", (bug_id,))
+    archive_and_delete(db, "bugs", bug_id)
     db.commit()
     return redirect(url_for("bugs_page"))
 
@@ -993,7 +1124,7 @@ def update_topic_progress(topic_id):
 @login_required
 def del_topic(topic_id):
     db = get_db()
-    db.execute("DELETE FROM roadmap_topics WHERE id=?", (topic_id,))
+    archive_and_delete(db, "roadmap_topics", topic_id)
     db.commit()
     return redirect(url_for("roadmap_page"))
 
@@ -1040,7 +1171,7 @@ def add_snippet():
 @login_required
 def del_snippet(snippet_id):
     db = get_db()
-    db.execute("DELETE FROM snippets WHERE id=?", (snippet_id,))
+    archive_and_delete(db, "snippets", snippet_id)
     db.commit()
     return redirect(url_for("snippets_page"))
 
@@ -1079,7 +1210,7 @@ def add_release():
 @login_required
 def del_release(release_id):
     db = get_db()
-    db.execute("DELETE FROM releases WHERE id=?", (release_id,))
+    archive_and_delete(db, "releases", release_id)
     db.commit()
     return redirect(url_for("releases_page"))
 
@@ -1143,7 +1274,7 @@ def review_interview(qid):
 @login_required
 def del_interview(qid):
     db = get_db()
-    db.execute("DELETE FROM interview_questions WHERE id=?", (qid,))
+    archive_and_delete(db, "interview_questions", qid)
     db.commit()
     return redirect(url_for("interview_page"))
 
@@ -1189,7 +1320,7 @@ def add_compile_error():
 @login_required
 def del_compile_error(err_id):
     db = get_db()
-    db.execute("DELETE FROM compile_errors WHERE id=?", (err_id,))
+    archive_and_delete(db, "compile_errors", err_id)
     db.commit()
     return redirect(url_for("compile_errors_page"))
 
@@ -1223,7 +1354,7 @@ def add_perf():
 @login_required
 def del_perf(record_id):
     db = get_db()
-    db.execute("DELETE FROM perf_records WHERE id=?", (record_id,))
+    archive_and_delete(db, "perf_records", record_id)
     db.commit()
     return redirect(url_for("perf_page"))
 
@@ -1270,7 +1401,7 @@ def add_command():
 @login_required
 def del_command(cmd_id):
     db = get_db()
-    db.execute("DELETE FROM commands WHERE id=?", (cmd_id,))
+    archive_and_delete(db, "commands", cmd_id)
     db.commit()
     return redirect(url_for("commands_page"))
 
@@ -1330,7 +1461,7 @@ def update_book_progress(book_id):
 @login_required
 def del_book(book_id):
     db = get_db()
-    db.execute("DELETE FROM books WHERE id=?", (book_id,))
+    archive_and_delete(db, "books", book_id)
     db.commit()
     return redirect(url_for("books_page"))
 
@@ -1389,7 +1520,7 @@ def resolve_crash(crash_id):
 @login_required
 def del_crash(crash_id):
     db = get_db()
-    db.execute("DELETE FROM crashes WHERE id=?", (crash_id,))
+    archive_and_delete(db, "crashes", crash_id)
     db.commit()
     return redirect(url_for("crashes_page"))
 
@@ -1574,7 +1705,7 @@ def cycle_driver_recommend(driver_id):
 @login_required
 def del_driver(driver_id):
     db = get_db()
-    db.execute("DELETE FROM drivers WHERE id=?", (driver_id,))
+    archive_and_delete(db, "drivers", driver_id)
     db.commit()
     return redirect(url_for("drivers_page"))
 
@@ -1623,7 +1754,7 @@ def add_protocol():
 @login_required
 def del_protocol(proto_id):
     db = get_db()
-    db.execute("DELETE FROM protocols WHERE id=?", (proto_id,))
+    archive_and_delete(db, "protocols", proto_id)
     db.commit()
     return redirect(url_for("protocols_page"))
 
@@ -1691,7 +1822,7 @@ def cycle_test_result(item_id):
 @login_required
 def del_test_item(item_id):
     db = get_db()
-    db.execute("DELETE FROM test_matrix WHERE id=?", (item_id,))
+    archive_and_delete(db, "test_matrix", item_id)
     db.commit()
     return redirect(url_for("test_matrix_page"))
 
@@ -1779,7 +1910,7 @@ def add_error_code():
 @login_required
 def del_error_code(code_id):
     db = get_db()
-    db.execute("DELETE FROM error_codes WHERE id=?", (code_id,))
+    archive_and_delete(db, "error_codes", code_id)
     db.commit()
     return redirect(url_for("error_codes_page"))
 
@@ -1829,7 +1960,7 @@ def add_log_pattern():
 @login_required
 def del_log_pattern(pattern_id):
     db = get_db()
-    db.execute("DELETE FROM log_patterns WHERE id=?", (pattern_id,))
+    archive_and_delete(db, "log_patterns", pattern_id)
     db.commit()
     return redirect(url_for("log_analysis_page"))
 
@@ -1874,7 +2005,7 @@ def add_printer():
 @login_required
 def del_printer(printer_id):
     db = get_db()
-    db.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+    archive_and_delete(db, "printers", printer_id)
     db.commit()
     return redirect(url_for("printers_page"))
 
@@ -1943,6 +2074,13 @@ def checklist_page():
             item["overdue"] = True
         items.append(item)
     items.sort(key=lambda x: (not x["overdue"], x["next_due"]))
+    overdue_titles = [x["title"] for x in items if x["overdue"]]
+    auth = _load_auth()
+    if overdue_titles and auth.get("last_notify_date") != today.isoformat():
+        if notify_webhook("巡检到期提醒",
+                          "以下巡检项已到期：\n" + "\n".join(overdue_titles)):
+            auth["last_notify_date"] = today.isoformat()
+            _save_auth(auth)
     return render_template("checklist.html", items=items, today=today.isoformat())
 
 
@@ -1978,7 +2116,7 @@ def done_checklist(item_id):
 @login_required
 def del_checklist(item_id):
     db = get_db()
-    db.execute("DELETE FROM checklists WHERE id=?", (item_id,))
+    archive_and_delete(db, "checklists", item_id)
     db.commit()
     return redirect(url_for("checklist_page"))
 
@@ -2098,6 +2236,7 @@ IMPORT_TABLES = {
     "templates": ["name", "content", "created_at"],
     "checklists": ["title", "model", "cycle_days", "last_done", "note", "created_at"],
     "edit_history": ["module", "ref_id", "action", "detail", "created_at"],
+    "trash": ["table_name", "ref_id", "payload", "deleted_at"],
 }
 
 
@@ -2133,6 +2272,141 @@ def import_data():
             imported += 1
     db.commit()
     return redirect(url_for("index"))
+
+
+# ---------- SNMP 打印机在线检测 ----------
+
+PRINTER_OIDS = {
+    "设备描述": "1.3.6.1.2.1.1.1.0",
+    "总打印页数": "1.3.6.1.2.1.43.10.2.1.4.1.1",
+}
+
+
+@app.route("/api/printers/<int:printer_id>/probe", methods=["POST"])
+@login_required
+def probe_printer(printer_id):
+    db = get_db()
+    p = db.execute("SELECT * FROM printers WHERE id=?", (printer_id,)).fetchone()
+    if not p:
+        return jsonify({"ok": False, "error": "机型不存在"})
+    if not p["ip"]:
+        return jsonify({"ok": False, "error": "该机型未配置 IP 地址"})
+    desc = snmp_get(p["ip"], PRINTER_OIDS["设备描述"])
+    if desc is None:
+        return jsonify({"ok": False,
+                        "error": "SNMP 无响应（设备离线、未开启 SNMP 或网络不可达）"})
+    items = {"设备描述": desc[1].decode("utf-8", "replace")}
+    pages = snmp_get(p["ip"], PRINTER_OIDS["总打印页数"])
+    if pages:
+        tag, raw = pages
+        if tag == 0x02 and raw:
+            items["总打印页数"] = str(int.from_bytes(raw, "big"))
+        elif raw:
+            items["总打印页数"] = raw.decode("utf-8", "replace")
+    return jsonify({"ok": True, "ip": p["ip"], "items": items})
+
+
+# ---------- 回收站 ----------
+
+TRASH_TITLE_KEYS = ["title", "name", "topic", "code", "model", "test_item",
+                    "question", "error_msg", "version", "content"]
+
+
+@app.route("/recycle")
+@login_required
+def recycle_page():
+    db = get_db()
+    rows = db.execute("SELECT * FROM trash ORDER BY id DESC").fetchall()
+    items = []
+    for r in rows:
+        try:
+            payload = json.loads(r["payload"])
+        except ValueError:
+            payload = {}
+        title = ""
+        for k in TRASH_TITLE_KEYS:
+            if payload.get(k):
+                title = str(payload[k])[:60]
+                break
+        items.append({"id": r["id"], "table": r["table_name"],
+                      "ref_id": r["ref_id"], "title": title,
+                      "deleted_at": r["deleted_at"]})
+    return render_template("recycle.html", items=items)
+
+
+@app.route("/api/recycle/<int:trash_id>/restore", methods=["POST"])
+@login_required
+def restore_trash(trash_id):
+    db = get_db()
+    r = db.execute("SELECT * FROM trash WHERE id=?", (trash_id,)).fetchone()
+    if r and r["table_name"] in IMPORT_TABLES:
+        try:
+            payload = json.loads(r["payload"])
+            table = r["table_name"]
+            cols = [c[1] for c in db.execute(
+                f"PRAGMA table_info({table})").fetchall()]
+            use = [c for c in cols if c in payload]
+            vals = [str(payload[c]) if payload[c] is not None else "" for c in use]
+            db.execute(
+                f"INSERT OR REPLACE INTO {table} ({','.join(use)}) "
+                f"VALUES ({','.join('?' * len(use))})", vals)
+            db.execute("DELETE FROM trash WHERE id=?", (trash_id,))
+            db.commit()
+        except ValueError:
+            pass
+    return redirect(request.referrer or url_for("recycle_page"))
+
+
+@app.route("/api/recycle/<int:trash_id>/purge", methods=["POST"])
+@login_required
+def purge_trash(trash_id):
+    db = get_db()
+    db.execute("DELETE FROM trash WHERE id=?", (trash_id,))
+    db.commit()
+    return redirect(request.referrer or url_for("recycle_page"))
+
+
+# ---------- 设置（API Token / 通知） ----------
+
+@app.route("/settings")
+@login_required
+def settings_page():
+    auth = _load_auth()
+    return render_template(
+        "settings.html", token=get_api_token(),
+        webhook=auth.get("notify_webhook", ""),
+        notify_enabled=bool(auth.get("notify_enabled")),
+        msg=request.args.get("msg", ""))
+
+
+@app.route("/api/settings/token/regenerate", methods=["POST"])
+@login_required
+def regenerate_token():
+    auth = _load_auth()
+    auth["api_token"] = secrets.token_hex(20)
+    _save_auth(auth)
+    return redirect(url_for("settings_page", msg="API Token 已重新生成，旧 Token 立即失效"))
+
+
+@app.route("/api/settings/notify", methods=["POST"])
+@login_required
+def save_notify():
+    auth = _load_auth()
+    auth["notify_webhook"] = request.form.get("webhook", "").strip()
+    auth["notify_enabled"] = bool(request.form.get("enabled"))
+    _save_auth(auth)
+    return redirect(url_for("settings_page", msg="通知配置已保存"))
+
+
+@app.route("/api/settings/notify/test", methods=["POST"])
+@login_required
+def test_notify():
+    ok = notify_webhook(
+        "工作台测试通知",
+        "发送时间 " + datetime.now().isoformat(timespec="seconds"))
+    return redirect(url_for(
+        "settings_page",
+        msg="测试通知已发送" if ok else "发送失败：请检查 Webhook 地址与启用开关"))
 
 
 # ---------- 全局搜索 ----------
@@ -2389,7 +2663,7 @@ def export_data():
     db = get_db()
     tables = ["work_logs", "study_notes", "todos", "templates", "diaries",
               "drivers", "protocols", "test_matrix", "error_codes", "log_patterns", "printers",
-              "checklists", "edit_history",
+              "checklists", "edit_history", "trash",
               "habits", "habit_logs", "bugs", "roadmap_topics", "snippets",
               "releases", "interview_questions", "compile_errors",
               "perf_records", "commands", "books"]

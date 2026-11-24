@@ -48,7 +48,7 @@
       </header>
       {% if p.summary %}<p class="entry-body">{{ p.summary }}</p>{% endif %}
       {% if p.commands %}<pre class="snippet-code">{{ p.commands }}</pre>{% endif %}
-      {% if p.notes %}<p class="entry-body"><b>备注：</b>{{ p.notes }}</p>{% endif %}
+      {% if p.notes %}<div class="entry-body md-body"><b>备注：</b>{{ p.notes|md }}</div>{% endif %}
       <footer class="entry-foot"><span class="muted">记录于 {{ p.created_at[:16] }}</span></footer>
     </article>
     {% endfor %}

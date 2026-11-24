@@ -52,11 +52,37 @@
         {% if p.ip %}<b>IP：</b>{{ p.ip }}　{% endif %}
         {% if p.owner %}<b>负责人：</b>{{ p.owner }}{% endif %}
       </p>
-      {% if p.notes %}<p class="entry-body"><b>备注：</b>{{ p.notes }}</p>{% endif %}
-      <footer class="entry-foot"><span class="muted">记录于 {{ p.created_at[:16] }}</span></footer>
+      {% if p.notes %}<div class="entry-body md-body"><b>备注：</b>{{ p.notes|md }}</div>{% endif %}
+      <footer class="entry-foot">
+        <span class="muted">记录于 {{ p.created_at[:16] }}</span>
+        {% if p.ip %}
+        <button class="btn btn-ghost btn-sm" type="button" onclick="probePrinter({{ p.id }}, this)">在线检测</button>
+        <span class="muted probe-result" data-id="{{ p.id }}"></span>
+        {% endif %}
+      </footer>
     </article>
     {% endfor %}
   </div>
   {% else %}<p class="empty">没有匹配的机型档案。</p>{% endif %}
 </section>
+<script>
+function probePrinter(id, btn) {
+  var out = document.querySelector('.probe-result[data-id="' + id + '"]');
+  if (!out) { return; }
+  btn.disabled = true;
+  out.textContent = '检测中…';
+  fetch('/api/printers/' + id + '/probe', {method: 'POST', credentials: 'same-origin'})
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.ok) {
+        var parts = Object.keys(d.items).map(function (k) { return k + '：' + d.items[k]; });
+        out.textContent = '✅ ' + d.ip + ' · ' + parts.join(' · ');
+      } else {
+        out.textContent = '⚠️ ' + (d.error || '检测失败');
+      }
+    })
+    .catch(function (e) { out.textContent = '⚠️ 请求失败：' + e; })
+    .finally(function () { btn.disabled = false; });
+}
+</script>
 {% endblock %}

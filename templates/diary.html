@@ -42,7 +42,7 @@
           <button class="btn-del" title="删除">×</button>
         </form>
       </header>
-      {% if d.content %}<p class="entry-body">{{ d.content }}</p>{% endif %}
+      {% if d.content %}<div class="entry-body md-body">{{ d.content|md }}</div>{% endif %}
     </article>
     {% endfor %}
   </div>

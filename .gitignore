@@ -12,3 +12,5 @@ __pycache__/
 # 数据库默认路径在 /root/workbench.db（仓库外），若移动到项目内也忽略
 *.db
 *.db.bak
+# 自动备份产物（含全量业务数据，禁止提交）
+backups/

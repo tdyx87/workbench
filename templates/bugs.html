@@ -88,7 +88,7 @@
       </header>
       {% if b.phenomenon %}<p class="entry-body"><b>现象：</b>{{ b.phenomenon }}</p>{% endif %}
       {% if b.root_cause %}<p class="entry-body"><b>根因：</b>{{ b.root_cause }}</p>{% endif %}
-      {% if b.solution %}<p class="entry-body"><b>方案：</b>{{ b.solution }}</p>{% endif %}
+      {% if b.solution %}<div class="entry-body md-body"><b>方案：</b>{{ b.solution|md }}</div>{% endif %}
       <footer class="entry-foot"><span class="muted">记录于 {{ b.created_at[:16] }}</span></footer>
     </article>
     {% endfor %}

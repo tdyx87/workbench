@@ -26,7 +26,7 @@
     <article class="entry">
       <header><span class="cat">{{ c.brand }}</span><span class="version-badge">{{ c.code }}</span><strong>{{ c.title }}</strong></header>
       {% if c.description %}<p class="entry-body"><b>描述：</b>{{ c.description }}</p>{% endif %}
-      {% if c.solution %}<p class="entry-body"><b>方案：</b>{{ c.solution }}</p>{% endif %}
+      {% if c.solution %}<div class="entry-body md-body"><b>方案：</b>{{ c.solution|md }}</div>{% endif %}
     </article>
     {% endfor %}
   </div>

@@ -50,7 +50,7 @@
         </form>
       </header>
       {% if e.root_cause %}<p class="entry-body"><b>根因：</b>{{ e.root_cause }}</p>{% endif %}
-      {% if e.solution %}<p class="entry-body"><b>解决：</b>{{ e.solution }}</p>{% endif %}
+      {% if e.solution %}<div class="entry-body md-body"><b>解决：</b>{{ e.solution|md }}</div>{% endif %}
       <footer class="entry-foot"><span class="muted">记录于 {{ e.created_at[:16] }}</span></footer>
     </article>
     {% endfor %}

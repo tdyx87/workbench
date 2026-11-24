@@ -43,7 +43,7 @@
         {% if r.technique %}<span class="tag">{{ r.technique }}</span>{% endif %}
       </p>
       {% endif %}
-      {% if r.detail %}<p class="entry-body">{{ r.detail }}</p>{% endif %}
+      {% if r.detail %}<div class="entry-body md-body">{{ r.detail|md }}</div>{% endif %}
       <footer class="entry-foot"><span class="muted">记录于 {{ r.created_at[:16] }}</span></footer>
     </article>
     {% endfor %}

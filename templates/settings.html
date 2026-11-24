@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}设置 · 个人工作台{% endblock %}
+{% block content %}
+<h1 class="page-title">⚙️ 设置</h1>
+{% if msg %}<div class="card"><p class="muted">{{ msg }}</p></div>{% endif %}
+
+<section class="card">
+  <h2>API Token</h2>
+  <p class="muted">用于脚本或第三方系统免登录访问 <code>/api/*</code> 接口，请求头格式：<code>X-API-Token: &lt;token&gt;</code></p>
+  <form class="form">
+    <label>当前 Token
+      <input type="text" value="{{ token }}" readonly onclick="this.select()" style="width:100%;font-family:monospace">
+    </label>
+  </form>
+  <form method="post" action="{{ url_for('regenerate_token') }}" onsubmit="return confirm('重新生成后旧 Token 立即失效，确定继续？')">
+    <button type="submit" class="btn btn-sm">重新生成 Token</button>
+  </form>
+  <p class="muted" style="margin-top:12px">示例：<code>curl -H &quot;X-API-Token: {{ token }}&quot; http://127.0.0.1:8000/api/export</code></p>
+</section>
+
+<section class="card">
+  <h2>到期通知</h2>
+  <p class="muted">巡检项到期时推送提醒，每天最多推送一次。支持 Server酱（https://sctapi.ftqq.com/&lt;SendKey&gt;.send）或任意接受 JSON 的 Webhook。</p>
+  <form method="post" action="{{ url_for('save_notify') }}" class="form">
+    <label>Webhook 地址
+      <input type="text" name="webhook" value="{{ webhook }}" placeholder="如：https://sctapi.ftqq.com/SCTxxxxx.send" style="width:100%">
+    </label>
+    <label class="check">
+      <input type="checkbox" name="enabled" value="1" {% if notify_enabled %}checked{% endif %}> 启用到期通知
+    </label>
+    <button type="submit" class="btn">保存配置</button>
+  </form>
+  <form method="post" action="{{ url_for('test_notify') }}" style="margin-top:10px">
+    <button type="submit" class="btn btn-ghost btn-sm">发送测试通知</button>
+  </form>
+</section>
+{% endblock %}
