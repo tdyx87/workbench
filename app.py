@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS commands (
     name TEXT NOT NULL,
     command TEXT NOT NULL,
     description TEXT DEFAULT '',
+    use_count INTEGER DEFAULT 0,
+    last_used TEXT,
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS books (
@@ -173,6 +175,7 @@ CREATE TABLE IF NOT EXISTS crashes (
     root_cause TEXT DEFAULT '',
     fix TEXT DEFAULT '',
     status TEXT DEFAULT '待分析',
+    error_code_id INTEGER,
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS drivers (
@@ -221,6 +224,7 @@ CREATE TABLE IF NOT EXISTS log_patterns (
     pattern TEXT DEFAULT '',
     interpretation TEXT DEFAULT '',
     action TEXT DEFAULT '',
+    error_code_id INTEGER,
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS printers (
@@ -1246,8 +1250,26 @@ def error_codes_page():
         params += [f"%{q}%"] * 4
     sql += " ORDER BY brand, code"
     codes = db.execute(sql, params).fetchall()
+    # 反向关联：每个错误码下挂了多少崩溃档案与日志模式
+    linked = {}
+    for c in codes:
+        cid = c["id"]
+        try:
+            crash_cnt = db.execute(
+                "SELECT COUNT(*) FROM crashes WHERE error_code_id=?",
+                (cid,)).fetchone()[0]
+        except sqlite3.DatabaseError:
+            crash_cnt = 0
+        try:
+            pat_cnt = db.execute(
+                "SELECT COUNT(*) FROM log_patterns WHERE error_code_id=?",
+                (cid,)).fetchone()[0]
+        except sqlite3.DatabaseError:
+            pat_cnt = 0
+        if crash_cnt or pat_cnt:
+            linked[cid] = {"crash": crash_cnt, "pattern": pat_cnt}
     return render_template("error_codes.html", codes=codes, brands=ERROR_BRANDS,
-                           active_brand=brand, q=q)
+                           active_brand=brand, q=q, linked=linked)
 
 
 @app.route("/api/error_codes", methods=["POST"])
@@ -1296,8 +1318,20 @@ def log_analysis_page():
         params += [f"%{q}%"] * 4
     sql += " ORDER BY id DESC"
     patterns = db.execute(sql, params).fetchall()
+    err_codes = db.execute(
+        "SELECT id, brand, code, title FROM error_codes "
+        "ORDER BY brand, code").fetchall()
+    code_map = {r["id"]: r for r in err_codes}
+    linked_codes = {}
+    for p in patterns:
+        keys = p.keys()
+        if "error_code_id" in keys and p["error_code_id"]:
+            hit = code_map.get(p["error_code_id"])
+            if hit:
+                linked_codes[p["id"]] = hit
     return render_template("log_analysis.html", patterns=patterns, sources=LOG_SOURCES,
-                           active_source=source, q=q)
+                           active_source=source, q=q, err_codes=err_codes,
+                           linked_codes=linked_codes)
 
 
 @app.route("/api/log_analysis", methods=["POST"])
@@ -1305,11 +1339,13 @@ def log_analysis_page():
 def add_log_pattern():
     f = request.form
     db = get_db()
+    ecid = f.get("error_code_id", "").strip()
+    error_code_id = int(ecid) if ecid.isdigit() else None
     db.execute(
-        "INSERT INTO log_patterns (title, source, pattern, interpretation, action, created_at) "
-        "VALUES (?,?,?,?,?,?)",
+        "INSERT INTO log_patterns (title, source, pattern, interpretation, action, "
+        "error_code_id, created_at) VALUES (?,?,?,?,?,?,?)",
         (f["title"], f.get("source", "CUPS error_log"), f.get("pattern", ""),
-         f.get("interpretation", ""), f.get("action", ""),
+         f.get("interpretation", ""), f.get("action", ""), error_code_id,
          datetime.now().isoformat(timespec="seconds")))
     db.commit()
     return redirect(url_for("log_analysis_page"))

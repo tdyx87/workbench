@@ -4,13 +4,25 @@
 <h1 class="page-title">💥 崩溃分析档案</h1>
 
 <section class="card">
+  <h2>⚡ 粘贴日志自动解析 <span class="muted">支持 gdb bt / 段错误输出 / Windows 崩溃转储文本</span></h2>
+  <textarea id="raw-log" rows="7" style="width:100%;font-family:Consolas,Monaco,monospace"
+    placeholder="把 gdb backtrace、Segmentation fault 输出或崩溃转储日志整段粘贴进来，点下方按钮自动提取信号、模块、顶层帧与常见根因"></textarea>
+  <div class="form-row" style="margin-top:10px">
+    <button class="btn" type="button" onclick="parseLog()">解析并预填</button>
+    <button class="btn btn-ghost" type="button" onclick="document.getElementById('raw-log').value=''">清空</button>
+    <span class="muted" id="parse-status"></span>
+  </div>
+  <div id="parse-result" style="display:none;margin-top:12px" class="report-box"></div>
+</section>
+
+<section class="card">
   <h2>记录崩溃案例</h2>
   <form method="post" action="{{ url_for('knowledge.add_crash') }}" class="form">
     <div class="form-row">
-      <label class="grow">标题 <input type="text" name="title" required placeholder="如：空指针导致服务崩溃"></label>
-      <label>模块 <input type="text" name="module" placeholder="如：网络库 / UI 层" style="width:150px"></label>
+      <label class="grow">标题 <input type="text" name="title" id="f-title" required placeholder="如：空指针导致服务崩溃"></label>
+      <label>模块 <input type="text" name="module" id="f-module" placeholder="如：网络库 / UI 层" style="width:150px"></label>
       <label>信号
-        <select name="signal">
+        <select name="signal" id="f-signal">
           <option value="">未知</option>
           {% for s in signals %}<option>{{ s }}</option>{% endfor %}
         </select>
@@ -21,11 +33,21 @@
         </select>
       </label>
     </div>
+    <div class="form-row">
+      <label class="grow">关联错误码
+        <select name="error_code_id" id="f-error-code" style="width:100%">
+          <option value="">不关联</option>
+          {% for e in err_codes %}
+          <option value="{{ e.id }}">{{ e.brand }} · {{ e.code }}{% if e.title %} — {{ e.title }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
     <label>关键堆栈
-      <textarea name="stack" rows="4" placeholder="gdb bt 关键帧、addr2line 定位结果…" style="font-family:Consolas,Monaco,monospace"></textarea>
+      <textarea name="stack" id="f-stack" rows="4" placeholder="gdb bt 关键帧、addr2line 定位结果…" style="font-family:Consolas,Monaco,monospace"></textarea>
     </label>
     <label>根因分析
-      <textarea name="root_cause" rows="2" placeholder="野指针 / 越界 / 竞态 / 生命周期问题…"></textarea>
+      <textarea name="root_cause" id="f-root" rows="2" placeholder="野指针 / 越界 / 竞态 / 生命周期问题…"></textarea>
     </label>
     <label>修复方案
       <textarea name="fix" rows="2" placeholder="修复方式、预防措施…"></textarea>
@@ -54,6 +76,10 @@
         {% if c.module %}<span class="cat">{{ c.module }}</span>{% endif %}
         <strong class="{{ 'solved' if c.status == '已修复' }}">{{ c.title }}</strong>
         <span class="bug-status {{ 'resolved' if c.status == '已修复' }}">{{ c.status }}</span>
+        {% set lk = linked_codes.get(c.id) %}
+        {% if lk %}
+        <a class="version-badge" href="{{ url_for('error_codes_page') }}?q={{ lk.code }}" title="查看该错误码详情">{{ lk.code }}</a>
+        {% endif %}
         <form method="post" action="{{ url_for('knowledge.resolve_crash', crash_id=c.id) }}" class="inline">
           <button class="btn btn-sm {{ 'btn-ghost' if c.status == '已修复' }}" type="submit">
             {{ '重新打开' if c.status == '已修复' else '标记修复 ✓' }}
@@ -72,4 +98,70 @@
   </div>
   {% else %}<p class="empty">没有匹配的崩溃档案。</p>{% endif %}
 </section>
+
+<script>
+const PARSE_URL = "{{ url_for('knowledge.parse_crash_api') }}";
+
+function parseLog() {
+  var raw = document.getElementById('raw-log').value;
+  var status = document.getElementById('parse-status');
+  var box = document.getElementById('parse-result');
+  if (!raw.trim()) {
+    status.textContent = '请先粘贴日志内容';
+    return;
+  }
+  status.textContent = '解析中…';
+  fetch(PARSE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw: raw })
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.ok) {
+      status.textContent = d.error || '解析失败';
+      return;
+    }
+    status.textContent = '解析完成，已预填，请核对后保存';
+
+    if (d.title) { document.getElementById('f-title').value = d.title; }
+    if (d.module) { document.getElementById('f-module').value = d.module; }
+    if (d.stack) { document.getElementById('f-stack').value = d.stack; }
+    if (d.root_hint) { document.getElementById('f-root').value = d.root_hint; }
+
+    var sig = document.getElementById('f-signal');
+    if (d.signal) {
+      for (var i = 0; i < sig.options.length; i++) {
+        if (sig.options[i].value === d.signal || sig.options[i].text === d.signal) {
+          sig.selectedIndex = i;
+          break;
+        }
+      }
+    }
+
+    if (d.error_code) {
+      var sel = document.getElementById('f-error-code');
+      for (var j = 0; j < sel.options.length; j++) {
+        if (sel.options[j].text.indexOf(d.error_code) >= 0) {
+          sel.selectedIndex = j;
+          break;
+        }
+      }
+    }
+
+    var rows = [];
+    rows.push('<b>识别结果</b>');
+    rows.push('信号：' + (d.signal || '未识别'));
+    rows.push('模块：' + (d.module || '未识别'));
+    rows.push('错误码候选：' + (d.error_code || '无'));
+    rows.push('根因提示：' + (d.root_hint || '无'));
+    rows.push('日志行数：' + d.line_count + '，源文件引用：' + d.path_count + ' 处');
+    if (d.frames && d.frames.length) {
+      rows.push('顶层帧：' + d.frames.join(' ← '));
+    }
+    box.innerHTML = rows.join('<br>');
+    box.style.display = 'block';
+  }).catch(function (e) {
+    status.textContent = '请求失败：' + e;
+  });
+}
+</script>
 {% endblock %}

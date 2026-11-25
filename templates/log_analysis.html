@@ -22,6 +22,14 @@
     <label>处理动作
       <textarea name="action" rows="2" placeholder="下一步排查动作、修复方式…"></textarea>
     </label>
+    <label>关联错误码
+      <select name="error_code_id">
+        <option value="">不关联</option>
+        {% for e in err_codes %}
+        <option value="{{ e.id }}">{{ e.brand }} · {{ e.code }}{% if e.title %} — {{ e.title }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
     <button type="submit" class="btn">保存笔记</button>
   </form>
 </section>
@@ -44,6 +52,10 @@
       <header>
         <span class="signal-badge">{{ p.source }}</span>
         <strong>{{ p.title }}</strong>
+        {% set lk = linked_codes.get(p.id) %}
+        {% if lk %}
+        <a class="version-badge" href="{{ url_for('error_codes_page') }}?q={{ lk.code }}" title="查看该错误码详情">{{ lk.code }}</a>
+        {% endif %}
         <form method="post" action="{{ url_for('del_log_pattern', pattern_id=p.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该日志笔记？')">
           <button class="btn-del" title="删除">×</button>
         </form>

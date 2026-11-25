@@ -43,6 +43,15 @@
         <span class="cat">{{ c.brand }}</span>
         <span class="version-badge">{{ c.code }}</span>
         <strong>{{ c.title }}</strong>
+        {% set lk = linked.get(c.id) %}
+        {% if lk %}
+          {% if lk.crash %}
+          <a class="chip" href="{{ url_for('knowledge.crashes_page') }}?q={{ c.code }}" title="关联的崩溃档案">💥 {{ lk.crash }} 条崩溃</a>
+          {% endif %}
+          {% if lk.pattern %}
+          <a class="chip" href="{{ url_for('log_analysis_page') }}?q={{ c.code }}" title="关联的日志模式">🔍 {{ lk.pattern }} 条日志</a>
+          {% endif %}
+        {% endif %}
         <form method="post" action="{{ url_for('del_error_code', code_id=c.id) }}" class="inline" style="margin-left:0" onsubmit="return confirm('删除该错误码？')">
           <button class="btn-del" title="删除">×</button>
         </form>

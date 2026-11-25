@@ -1,7 +1,8 @@
 """知识库蓝图：Bug、学习路线、片段、发版、面试题、编译错误、性能、命令、读书、崩溃。"""
+import re
 from datetime import date, datetime, timedelta
 
-from flask import (Blueprint, redirect, render_template, request,
+from flask import (Blueprint, jsonify, redirect, render_template, request,
                    url_for)
 
 from shared import (COMPILERS, PLATFORMS, REVIEW_INTERVALS,
@@ -394,10 +395,17 @@ def commands_page():
     if q:
         sql += " AND (name LIKE ? OR command LIKE ? OR description LIKE ?)"
         params += [f"%{q}%"] * 3
-    sql += " ORDER BY category, id"
+    sort = request.args.get("sort", "").strip()
+    if sort == "hot":
+        sql += " ORDER BY COALESCE(use_count,0) DESC, category, id"
+    else:
+        sql += " ORDER BY category, id"
     rows = db.execute(sql, params).fetchall()
+    hot = db.execute(
+        "SELECT * FROM commands WHERE COALESCE(use_count,0) > 0 "
+        "ORDER BY use_count DESC, last_used DESC LIMIT 6").fetchall()
     return render_template("commands.html", commands=rows, categories=categories,
-                           active_cat=cat, q=q)
+                           active_cat=cat, q=q, sort=sort, hot=hot)
 
 
 @bp.route("/api/commands", methods=["POST"])
@@ -412,6 +420,22 @@ def add_command():
          f.get("description", ""), datetime.now().isoformat(timespec="seconds")))
     db.commit()
     return redirect(url_for("knowledge.commands_page"))
+
+
+@bp.route("/api/commands/<int:cmd_id>/use", methods=["POST"])
+@login_required
+def use_command(cmd_id):
+    """记录一次使用：频次 +1，写入最后使用时间。"""
+    db = get_db()
+    db.execute(
+        "UPDATE commands SET use_count = COALESCE(use_count,0) + 1, "
+        "last_used = ? WHERE id = ?",
+        (datetime.now().isoformat(timespec="seconds"), cmd_id))
+    db.commit()
+    row = db.execute("SELECT use_count FROM commands WHERE id=?",
+                     (cmd_id,)).fetchone()
+    return jsonify({"ok": True,
+                    "use_count": row["use_count"] if row else 0})
 
 
 @bp.route("/api/commands/<int:cmd_id>/delete", methods=["POST"])
@@ -506,8 +530,21 @@ def crashes_page():
         params += [f"%{q}%"] * 4
     sql += " ORDER BY CASE status WHEN '待分析' THEN 0 ELSE 1 END, id DESC"
     rows = db.execute(sql, params).fetchall()
+    # 错误码下拉数据 + 已关联错误码回填（打通 error_codes 链路）
+    err_codes = db.execute(
+        "SELECT id, brand, code, title FROM error_codes "
+        "ORDER BY brand, code").fetchall()
+    code_map = {r["id"]: r for r in err_codes}
+    linked_codes = {}
+    for r in rows:
+        keys = r.keys()
+        if "error_code_id" in keys and r["error_code_id"]:
+            hit = code_map.get(r["error_code_id"])
+            if hit:
+                linked_codes[r["id"]] = hit
     return render_template("crashes.html", crashes=rows, signals=CRASH_SIGNALS,
-                           active_status=status, q=q)
+                           active_status=status, q=q, err_codes=err_codes,
+                           linked_codes=linked_codes)
 
 
 @bp.route("/api/crashes", methods=["POST"])
@@ -515,12 +552,15 @@ def crashes_page():
 def add_crash():
     f = request.form
     db = get_db()
+    ecid = f.get("error_code_id", "").strip()
+    error_code_id = int(ecid) if ecid.isdigit() else None
     db.execute(
         "INSERT INTO crashes (title, module, signal, stack, root_cause, fix, "
-        "status, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        "status, error_code_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
         (f["title"], f.get("module", ""), f.get("signal", ""),
          f.get("stack", ""), f.get("root_cause", ""), f.get("fix", ""),
-         f.get("status", "待分析"), datetime.now().isoformat(timespec="seconds")))
+         f.get("status", "待分析"), error_code_id,
+         datetime.now().isoformat(timespec="seconds")))
     db.commit()
     return redirect(url_for("knowledge.crashes_page"))
 
@@ -539,6 +579,124 @@ def resolve_crash(crash_id):
                  f"{old['status']} → {nxt}")
     db.commit()
     return redirect(request.referrer or url_for("knowledge.crashes_page"))
+
+
+# ---------- 崩溃日志自动解析 ----------
+
+CRASH_SIGNAL_RE = re.compile(
+    r"SIG(?:SEGV|ABRT|BUS|FPE|ILL|TERM|KILL|TRAP|SYS)"
+    r"|Segmentation fault|Aborted|core dumped"
+    r"|Access violation|EXCEPTION_ACCESS_VIOLATION",
+    re.IGNORECASE)
+
+CRASH_FRAME_RE = re.compile(
+    r"#(?:0|[1-9][0-9]{0,2})\s+0x[0-9a-fA-F]+\s+in\s+([^\s(]+)")
+
+CRASH_PATH_RE = re.compile(
+    r"([A-Za-z0-9_.\-]+)\.(?:c|cc|cpp|cxx|h|hpp|m|mm|rs|go|py|java|kt)"
+    r":([0-9]+)")
+
+CRASH_ERRCODE_RE = re.compile(
+    r"\bSC[0-9]{3}\b|\b[0-9]{2}\.[0-9A-Z][0-9A-Z]{2,4}\b"
+    r"|\bE[0-9]{3}\b|\bERR[0-9]{1,4}\b")
+
+CRASH_HINTS = [
+    ("空指针 / 无效地址", ["null pointer", "nullptr", "address 0x0",
+                          "0x0000000000000000", "null dereference"]),
+    ("数组越界 / 缓冲区溢出", ["buffer overflow", "out of bounds",
+                              "stack smashing", "heap-buffer-overflow"]),
+    ("堆内存损坏 / 重复释放", ["double free", "invalid pointer",
+                              "free(): ", "heap corruption", "use-after-free"]),
+    ("栈溢出 / 递归过深", ["stack overflow", "stack-overflow",
+                           "infinite recursion"]),
+    ("除零 / 算术异常", ["division by zero", "divide by zero", "integer divide"]),
+    ("断言失败", ["assertion", "assert failed", "Assertion `"]),
+    ("依赖库缺失 / 加载失败", ["cannot open shared object", "undefined symbol",
+                               "library not found", "ImportError", "DLL load failed"]),
+    ("线程竞态 / 死锁", ["deadlock", "race condition", "mutex",
+                         "resource deadlock"]),
+]
+
+
+def parse_crash_log(text):
+    """从原始崩溃日志中提取结构化字段，供前端预填后人工确认。"""
+    raw = (text or "").strip()
+    if not raw:
+        return {"ok": False, "error": "日志内容为空"}
+
+    lines = raw.splitlines()
+    signal = ""
+    m = CRASH_SIGNAL_RE.search(raw)
+    if m:
+        token = m.group(0)
+        upper = token.upper()
+        if upper.startswith("SIG"):
+            signal = upper
+        elif "SEGMENTATION" in upper or "ACCESS VIOLATION" in upper:
+            signal = "SIGSEGV"
+        elif "ABORT" in upper:
+            signal = "SIGABRT"
+        elif "CORE DUMPED" in upper:
+            signal = "SIGSEGV"
+
+    frames = CRASH_FRAME_RE.findall(raw)
+    stack = "\n".join(lines[:80]) if len(lines) > 1 else raw[:2000]
+
+    # 模块：优先取出现次数最多的源文件名
+    paths = CRASH_PATH_RE.findall(raw)
+    module = ""
+    if paths:
+        counts = {}
+        for name, _ln in paths:
+            counts[name] = counts.get(name, 0) + 1
+        module = max(counts, key=counts.get)
+    elif frames:
+        top = frames[0]
+        if "::" in top:
+            module = top.split("::")[0]
+        elif "_" in top:
+            module = top.split("_")[0]
+        else:
+            module = top
+
+    codes = CRASH_ERRCODE_RE.findall(raw)
+    error_code = codes[0] if codes else ""
+
+    low = raw.lower()
+    hint = ""
+    for label, keys in CRASH_HINTS:
+        if any(k.lower() in low for k in keys):
+            hint = label
+            break
+
+    # 标题建议：信号 + 顶层帧，便于直接采用
+    title = ""
+    if frames:
+        title = "%s: %s" % (signal or "崩溃", frames[0][:60])
+    elif signal:
+        title = "%s 崩溃" % signal
+
+    return {
+        "ok": True,
+        "signal": signal,
+        "module": module[:60],
+        "stack": stack,
+        "title": title[:120],
+        "error_code": error_code,
+        "root_hint": hint,
+        "frames": frames[:8],
+        "path_count": len(paths),
+        "line_count": len(lines),
+    }
+
+
+@bp.route("/api/crashes/parse", methods=["POST"])
+@login_required
+def parse_crash_api():
+    """粘贴原始崩溃日志，返回自动解析出的字段供人工确认。"""
+    data = request.get_json(silent=True) or {}
+    raw = data.get("raw") or request.form.get("raw", "")
+    return jsonify(parse_crash_log(raw))
 
 
 @bp.route("/api/crashes/<int:crash_id>/delete", methods=["POST"])
