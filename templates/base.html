@@ -6,15 +6,30 @@
   <title>{% block title %}个人工作台{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="manifest" href="{{ url_for('pwa_manifest') }}">
-  <meta name="theme-color" content="#2c3e50">
+  <meta name="theme-color" content="#070b12">
   <script>
-    if (localStorage.getItem('wb-theme') === 'dark') {
-      document.documentElement.classList.add('dark');
-    }
+    /* 深色为默认主题；只有显式选择亮色时才挂 html.light */
+    (function () {
+      var saved = localStorage.getItem('wb-theme');
+      if (saved === 'light') {
+        document.documentElement.classList.add('light');
+      }
+    })();
     function toggleTheme() {
-      const dark = document.documentElement.classList.toggle('dark');
-      localStorage.setItem('wb-theme', dark ? 'dark' : 'light');
+      var isLight = document.documentElement.classList.toggle('light');
+      localStorage.setItem('wb-theme', isLight ? 'light' : 'dark');
+      var btn = document.querySelector('.theme-toggle');
+      if (btn) { btn.textContent = isLight ? '🌙' : '☀️'; }
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) { meta.setAttribute('content', isLight ? '#f0f2f5' : '#070b12'); }
     }
+    document.addEventListener('DOMContentLoaded', function () {
+      var btn = document.querySelector('.theme-toggle');
+      if (btn) {
+        btn.textContent = document.documentElement.classList.contains('light')
+          ? '🌙' : '☀️';
+      }
+    });
   </script>
 </head>
 <body>
@@ -56,7 +71,7 @@
         <a href="{{ url_for('admin.recycle_page') }}" class="{{ 'active' if request.endpoint == 'admin.recycle_page' }}">回收站</a>
         <a href="{{ url_for('admin.settings_page') }}" class="{{ 'active' if request.endpoint == 'admin.settings_page' }}">设置</a>
         <a href="{{ url_for('export_data') }}" title="导出全部数据为 JSON">导出</a>
-        <a href="javascript:void(0)" onclick="toggleTheme()" title="切换暗色模式" class="theme-toggle">🌓</a>
+        <a href="javascript:void(0)" onclick="toggleTheme()" title="切换亮色/深色主题" class="theme-toggle">☀️</a>
         <a href="{{ url_for('logout') }}" class="logout-link">退出</a>
       </div>
     </div>
