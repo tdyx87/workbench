@@ -24,8 +24,57 @@ from markupsafe import Markup, escape
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUTH_FILE = os.path.join(BASE_DIR, "auth.json")
 
+def _load_or_create_secret_key():
+    """取会话签名密钥：持久化在 auth.json 中，各 worker 共享同一份。
+
+    之前每次进程启动随机生成，gunicorn 多 worker 下会各自持有不同密钥，
+    导致 worker A 签发的会话 cookie 到 worker B 校验失败——表现为会话随机
+    失效、莫名跳回登录页、重启后全员掉线。
+
+    首次运行生成并写回 auth.json；用文件锁避免多个 worker 同时启动时
+    各自生成不同密钥再互相覆盖。
+    """
+    try:
+        import fcntl
+    except ImportError:      # Windows 无 fcntl，退化为不枷锁
+        fcntl = None
+
+    lock_fd = None
+    lock_path = AUTH_FILE + ".lock"
+    try:
+        if fcntl is not None:
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+        try:
+            with open(AUTH_FILE, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            data = {}
+
+        key = data.get("secret_key")
+        if not key:
+            key = secrets.token_hex(32)
+            data["secret_key"] = key
+            tmp = AUTH_FILE + ".tmp"
+            try:
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(data, fh, ensure_ascii=False, indent=2)
+                os.replace(tmp, AUTH_FILE)
+                os.chmod(AUTH_FILE, 0o600)
+            except OSError:
+                pass         # 写不进去不影响本次运行，仅下次重启重新生成
+        return key
+    finally:
+        if lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
+
+
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)
+app.secret_key = _load_or_create_secret_key()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS work_logs (

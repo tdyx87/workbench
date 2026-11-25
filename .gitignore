@@ -1,5 +1,7 @@
-# 敏感文件（含登录密码哈希与初始密码，禁止提交）
+# 敏感文件（含登录密码哈希、api_token、secret_key 与初始密码，禁止提交）
 auth.json
+auth.json.lock
+auth.json.tmp
 INITIAL_PASSWORD.txt
 
 # 日志
